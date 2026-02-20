@@ -108,3 +108,10 @@ services:
     command: taskmanager
     depends_on:
       - flink-jobmanager
+
+# Projenin sonlarına doğru alt kısmı ekle ve gerekli düzenlemeleri yap.
+# networks:
+#   flink-net:
+#     driver: bridge
+# volumes:
+#   kafka_data:

@@ -1,4 +1,23 @@
+# Python
 __pycache__/
 *.pyc
 .env
+
+# Java / Maven
+**/target/
+*.class
+*.jar
+*.war
+dependency-reduced-pom.xml
+
+# Logs
 *.log
+
+# IDE
+.gemini/
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
