@@ -1,1 +1,1 @@
-kafka-python
+confluent-kafka[avro]

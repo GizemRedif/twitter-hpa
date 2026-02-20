@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "Tweet",
+  "namespace": "com.twitter.hpa",
+  "fields": [
+    {"name": "tweet_id", "type": "string"},
+    {"name": "airline", "type": "string"},
+    {"name": "airline_sentiment", "type": "string"},
+    {"name": "text", "type": "string"},
+    {"name": "retweet_count", "type": "int"},
+    {"name": "tweet_created", "type": "string"}
+  ]
+}

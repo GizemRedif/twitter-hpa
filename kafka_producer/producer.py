@@ -1,18 +1,48 @@
 import csv
-import json
 import time
 import random
-from kafka import KafkaProducer
+from confluent_kafka import SerializingProducer
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer
 
-# Kafka'ya bağlanmak için producer oluşturulur.
-print("It connects to Kafka....")
-producer = KafkaProducer(
-    bootstrap_servers="kafka:29092",  # Docker ağı (network) içerisindeki diğer konteynerlerden Kafka'ya erişmek için kullanılır.
-    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+# AVRO şeması: Kafka'ya gönderilecek tweet verisinin yapısını tanımlar.
+TWEET_SCHEMA = """{
+  "type": "record",
+  "name": "Tweet",
+  "namespace": "com.twitter.hpa",
+  "fields": [
+    {"name": "tweet_id", "type": "string"},
+    {"name": "airline", "type": "string"},
+    {"name": "airline_sentiment", "type": "string"},
+    {"name": "text", "type": "string"},
+    {"name": "retweet_count", "type": "int"},
+    {"name": "tweet_created", "type": "string"}
+  ]
+}"""
+
+# Schema Registry client: şema yönetimi için Confluent Schema Registry'ye bağlanır.
+schema_registry_client = SchemaRegistryClient({"url": "http://schema-registry:8081"})
+
+# AVRO Serializer: Python dict'i AVRO formatına çevirir ve şemayı Schema Registry'ye kaydeder.
+avro_serializer = AvroSerializer(
+    schema_registry_client=schema_registry_client,
+    schema_str=TWEET_SCHEMA
 )
+
+# Kafka producer: AVRO formatında mesaj gönderen producer oluşturulur.
+print("It connects to Kafka....")
+producer = SerializingProducer({
+    "bootstrap.servers": "kafka:29092",
+    "value.serializer": avro_serializer
+})
 print("It connected to Kafka!")
 
-# CSV dosyasını okur ve her satırı Kafka'ya gönderir.
+# Mesaj gönderim sonucunu kontrol eden callback fonksiyonu.
+def delivery_report(err, msg):
+    if err is not None:
+        print(f"Message delivery failed: {err}")
+
+# CSV dosyasını okur ve her satırı AVRO formatında Kafka'ya gönderir.
 count = 0
 with open("Tweets.csv", encoding="utf-8", errors="replace") as f:
     reader = csv.DictReader(f)
@@ -26,8 +56,13 @@ with open("Tweets.csv", encoding="utf-8", errors="replace") as f:
             "tweet_created": row["tweet_created"]
         }
 
-        # Mesajı Kafka'ya gönderir.
-        producer.send("tweets_topic", msg)
+        # Mesajı AVRO formatında Kafka'ya gönderir.
+        producer.produce(
+            topic="tweets_topic",
+            value=msg,
+            on_delivery=delivery_report
+        )
+        producer.poll(0)
         count += 1
         if count % 100 == 0:
             print(f"{count} tweet sent...")
@@ -37,4 +72,3 @@ with open("Tweets.csv", encoding="utf-8", errors="replace") as f:
 # Gönderilen tüm mesajların Kafka'ya ulaştığından emin olmak için kullanılır.
 producer.flush()
 print(f"All {count} tweets sent to Kafka.")
-
