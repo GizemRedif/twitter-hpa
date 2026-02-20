@@ -58,7 +58,7 @@ with open("Tweets.csv", encoding="utf-8", errors="replace") as f:
 
         # Mesajı AVRO formatında Kafka'ya gönderir.
         producer.produce(
-            topic="tweets_topic",
+            topic="tweets.raw",
             value=msg,
             on_delivery=delivery_report
         )

@@ -3,6 +3,9 @@ package com.twitter.hpa;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.formats.avro.registry.confluent.ConfluentRegistryAvroDeserializationSchema;
@@ -11,7 +14,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 /**
  * Flink uygulamasının ana giriş noktası (main class).
- * Kafka'daki "tweets_topic" topic'inden AVRO formatındaki tweet verilerini okur ve işler.
+ * Kafka'daki "tweets.raw" topic'inden AVRO formatındaki tweet verilerini okur ve işler.
+ * Negatif sentiment'e sahip tweet'leri "tweets.alert" topic'ine yazar.
  * Confluent Schema Registry üzerinden şema çözümlemesi yapar.
  */
 
@@ -31,7 +35,7 @@ public class DataStreamJob {
 		// Kafka Source: tweets_topic'ten AVRO mesajları okur (Schema Registry ile)
 		KafkaSource<GenericRecord> kafkaSource = KafkaSource.<GenericRecord>builder()
 				.setBootstrapServers("kafka:29092")
-				.setTopics("tweets_topic")
+				.setTopics("tweets.raw")
 				.setGroupId("flink-tweets-group")
 				.setStartingOffsets(OffsetsInitializer.earliest())
 				// Confluent Registry üzerinden AVRO deserialization
@@ -47,11 +51,30 @@ public class DataStreamJob {
 		DataStream<GenericRecord> tweetStream = env.fromSource(
 				kafkaSource,
 				WatermarkStrategy.noWatermarks(),
-				"Kafka Source - tweets_topic"
+				"Kafka Source - tweets.raw"
 		);
 
 		// Gelen tweet'leri konsola yazdır
 		tweetStream.print();
+
+		// Negatif sentiment'li tweet'leri filtrele
+		DataStream<String> negativeTweets = tweetStream
+				.filter(record -> "negative".equals(record.get("airline_sentiment").toString()))
+				.map(record -> record.toString());
+
+		// Kafka Sink: Negatif tweet'leri tweets.alert topic'ine yaz
+		KafkaSink<String> alertSink = KafkaSink.<String>builder()
+				.setBootstrapServers("kafka:29092")
+				.setRecordSerializer(
+						KafkaRecordSerializationSchema.builder()
+								.setTopic("tweets.alert")
+								.setValueSerializationSchema(new SimpleStringSchema())
+								.build()
+				)
+				.build();
+
+		// Negatif tweet'leri tweets.alert topic'ine gönder
+		negativeTweets.sinkTo(alertSink);
 
 		// Flink job'ını başlat
 		env.execute("Twitter Tweets Stream Processing");
