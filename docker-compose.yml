@@ -35,6 +35,46 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  # Kafka topic'lerini otomatik oluşturur
+  # tweets.raw: 3 partition, 7 gün retention, cleanup.policy=delete
+  # tweets.alert: 1 partition, 1 gün retention
+  # Kafka'ya bağlanır, tweets.raw'dan AVRO formatında tweet'leri okur ve işler.
+  # Negatif sentiment'e sahip tweet'leri "tweets.alert" topic'ine yazar.
+  # Confluent Schema Registry üzerinden şema çözümlemesi yapar.
+  # 1 Partition nedeni: Alert'ler sırayla okunmalıdır. Verim önemsiz, latency önemlidir.
+  init-kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: init-kafka
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      echo 'Waiting for Kafka to be ready...'
+      cub kafka-ready -b kafka:29092 1 30
+
+      echo 'Creating tweets.raw topic...'
+      kafka-topics --create --if-not-exists \
+        --bootstrap-server kafka:29092 \
+        --topic tweets.raw \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete
+
+      echo 'Creating tweets.alert topic...'
+      kafka-topics --create --if-not-exists \
+        --bootstrap-server kafka:29092 \
+        --topic tweets.alert \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=86400000
+
+      echo 'Topics created!'
+      kafka-topics --list --bootstrap-server kafka:29092
+      "
+    restart: "no"
+
   # Confluent Schema Registry: AVRO şema yönetimi için kullanılır.
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
@@ -78,6 +118,30 @@ services:
     container_name: mongo
     ports:
       - "27017:27017"
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+  mongo-alert-consumer:
+    build: ./mongo_alert_consumer
+    container_name: mongo-alert-consumer
+    depends_on:
+      - kafka
+      - mongo
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: on-failure
+
+  mongo-raw-consumer:
+    build: ./mongo_raw_consumer
+    container_name: mongo-raw-consumer
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: on-failure
 
   airflow:
     image: apache/airflow:2.7.1

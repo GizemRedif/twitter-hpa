@@ -1,5 +1,5 @@
-# Kafka Producer - Docker Image Build Tarifi (Dockerfile)
-# docker-compose.yml'deki "kafka-producer" servisi bu Dockerfile'ı kullanarak image build eder.
+# MongoDB Alert Consumer - Docker Image Build Tarifi (Dockerfile)
+# docker-compose.yml'deki "mongo-alert-consumer" servisi bu Dockerfile'ı kullanarak image build eder.
 
 # Python 3.11'in hafif versiyonu (slim = gereksiz paketler çıkarılmış)
 FROM python:3.11-slim
@@ -12,8 +12,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Projedeki tüm dosyaları (producer.py, Tweets.csv vb.) container'a kopyala
-COPY . .
+# Consumer script'ini container'a kopyala
+COPY consumer.py .
 
 # Container ayağa kalktığında varsayılan olarak çalıştırılacak komut
-CMD ["python", "producer.py"]
+CMD ["python", "consumer.py"]

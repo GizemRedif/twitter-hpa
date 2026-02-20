@@ -1,0 +1,2 @@
+confluent-kafka[avro]==2.3.0
+pymongo==4.6.1
