@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "TweetMetrics",
+  "namespace": "com.twitter.hpa",
+  "fields": [
+    {"name": "airline", "type": "string"},
+    {"name": "tweet_count", "type": "long"},
+    {"name": "positive_count", "type": "long"},
+    {"name": "negative_count", "type": "long"},
+    {"name": "neutral_count", "type": "long"},
+    {"name": "positive_ratio", "type": "double"},
+    {"name": "negative_ratio", "type": "double"},
+    {"name": "avg_retweet", "type": "double"},
+    {"name": "max_retweet", "type": "long"},
+    {"name": "tweet_rate", "type": "double"},
+    {"name": "window_start", "type": "string"},
+    {"name": "window_end", "type": "string"}
+  ]
+}

@@ -37,11 +37,8 @@ services:
 
   # Kafka topic'lerini otomatik oluşturur
   # tweets.raw: 3 partition, 7 gün retention, cleanup.policy=delete
-  # tweets.alert: 1 partition, 1 gün retention
-  # Kafka'ya bağlanır, tweets.raw'dan AVRO formatında tweet'leri okur ve işler.
-  # Negatif sentiment'e sahip tweet'leri "tweets.alert" topic'ine yazar.
-  # Confluent Schema Registry üzerinden şema çözümlemesi yapar.
-  # 1 Partition nedeni: Alert'ler sırayla okunmalıdır. Verim önemsiz, latency önemlidir.
+  # tweets.alert: 1 partition, 1 gün retention (1 Partition nedeni: Alert'ler sırayla okunmalıdır. Verim önemsiz, latency önemlidir.)
+  # tweets.metrics: 2 partition, 3 gün retention
   init-kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: init-kafka
@@ -69,6 +66,14 @@ services:
         --partitions 1 \
         --replication-factor 1 \
         --config retention.ms=86400000
+
+      echo 'Creating tweets.metrics topic...'
+      kafka-topics --create --if-not-exists \
+        --bootstrap-server kafka:29092 \
+        --topic tweets.metrics \
+        --partitions 2 \
+        --replication-factor 1 \
+        --config retention.ms=259200000
 
       echo 'Topics created!'
       kafka-topics --list --bootstrap-server kafka:29092
@@ -125,8 +130,10 @@ services:
     build: ./mongo_alert_consumer
     container_name: mongo-alert-consumer
     depends_on:
-      - kafka
-      - mongo
+      schema-registry:
+        condition: service_healthy
+      mongo:
+        condition: service_started
     environment:
       PYTHONUNBUFFERED: "1"
     restart: on-failure

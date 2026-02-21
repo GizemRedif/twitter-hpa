@@ -42,7 +42,7 @@ TWEET_SCHEMA = """{
 }"""
 
 
-# ── Kafka + Schema Registry bağlantısı (retry ile) ──────────────────────────
+# -------- Kafka + Schema Registry bağlantısı (retry ile) ------------
 def create_consumer(max_retries: int = 30, retry_interval: int = 5):
     """Kafka ve Schema Registry hazır olana kadar yeniden bağlanmayı dener."""
     for attempt in range(1, max_retries + 1):
@@ -75,7 +75,7 @@ def create_consumer(max_retries: int = 30, retry_interval: int = 5):
     raise RuntimeError("Could not connect after maximum retries")
 
 
-# ── Ana akış ─────────────────────────────────────────────────────────────────
+# ---------------- Ana akış -----------------------------
 def main():
     print("Starting MongoDB Raw Tweets Consumer...")
 

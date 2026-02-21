@@ -1,113 +1,83 @@
 """
 Kafka tweets.alert topic'ini dinleyen ve MongoDB'ye yazan consumer.
-Flink'in GenericRecord.toString() çıktısını parse ederek alanları çıkarır.
+AVRO formatındaki mesajları Confluent Schema Registry üzerinden deserialize eder.
+Negatif sentiment'li tweet'leri tweet_alerts koleksiyonuna kaydeder.
 """
 
-import json
-import re
 import time
 from datetime import datetime, timezone
 
-from kafka import KafkaConsumer
-from kafka.errors import NoBrokerAvailable
+from confluent_kafka import Consumer
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroDeserializer
+from confluent_kafka.serialization import SerializationContext, MessageField
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
 
-# ── Ayarlar ──────────────────────────────────────────────────────────────────
+# -------- Ayarlar ------------
 KAFKA_BOOTSTRAP = "kafka:29092"
 KAFKA_TOPIC = "tweets.alert"
 KAFKA_GROUP_ID = "mongo-alert-consumer-group"
+
+SCHEMA_REGISTRY_URL = "http://schema-registry:8081"
 
 MONGO_URI = "mongodb://mongo:27017"
 MONGO_DB = "twitter_hpa"
 MONGO_COLLECTION = "tweet_alerts"
 
-
-# ── Flink GenericRecord.toString() çıktısını parse et ───────────────────────
-def parse_alert_message(raw: str) -> dict | None:
-    """
-    Flink'ten gelen ham string mesajı (GenericRecord.toString()) parse edip bir Python dict'e çevirir.
-    Bu çıktı genelde JSON'a benzer ama her zaman geçerli JSON olmayabilir.
-    Bu yüzden iki aşamalı bir parse stratejisi uygulanır:
-      1) JSON parse — hızlı ve güvenilir, çoğu durumda çalışır
-      2) Regex parse — JSON başarısız olursa, metin içindeki alanları regex ile çıkarır
-    """
-
-    # ── 1. AŞAMA: JSON parse ────────────────────────────────────────────────
-    # GenericRecord.toString() çıktısı çoğunlukla geçerli JSON formatındadır.
-    # json.loads() ile doğrudan parse etmeyi deneriz
-    try:
-        data = json.loads(raw)
-
-        # JSON başarılı oldu, alanları dict olarak döndür.
-        return {
-            "tweet_id": str(data.get("tweet_id", "")),
-            "airline": str(data.get("airline", "")),
-            "airline_sentiment": str(data.get("airline_sentiment", "")),
-            "text": str(data.get("text", "")),
-            "retweet_count": int(data.get("retweet_count", 0)),
-            "tweet_created": str(data.get("tweet_created", "")),
-        }
-    except (json.JSONDecodeError, TypeError):
-        # JSON parse başarısız oldu (örn. tweet metninde tırnak veya özel karakter var).
-        # 2. aşamaya geç.
-        pass
-
-    # ── 2. AŞAMA: Regex (düzenli ifade) ile parse ───────────────────────────
-    # JSON çalışmazsa, metni regex ile tarayarak "key": "value" çiftlerini buluruz.
-    # Bu yöntem daha esnek ama daha yavaştır.
-    try:
-        pattern = r'"(\w+)":\s*(?:"((?:[^"\\]|\\.)*)"|(\d+))'
-        raw_matches = re.findall(pattern, raw)
-
-        # Her eşleşmede grup2 (string) veya grup3 (sayı) dolu olur
-        matches = {key: (str_val if str_val else num_val) for key, str_val, num_val in raw_matches}
-
-        # tweet_id alanı varsa geçerli bir tweet mesajı olarak kabul et
-        if "tweet_id" in matches:
-            return {
-                "tweet_id": matches.get("tweet_id", ""),
-                "airline": matches.get("airline", ""),
-                "airline_sentiment": matches.get("airline_sentiment", ""),
-                "text": matches.get("text", ""),
-                "retweet_count": int(matches.get("retweet_count", 0)),
-                "tweet_created": matches.get("tweet_created", ""),
-            }
-    except Exception:
-        pass
-
-    # ── Her iki aşama da başarısız oldu ──────────────────────────────────────
-    # Mesaj parse edilemedi, uyarı logla ve None döndür (bu mesaj atlanacak).
-    print(f"[WARN] Could not parse message: {raw[:200]}")
-    return None
+# AVRO şeması: Tweet yapısı (tweets.raw ile aynı)
+TWEET_SCHEMA = """{
+  "type": "record",
+  "name": "Tweet",
+  "namespace": "com.twitter.hpa",
+  "fields": [
+    {"name": "tweet_id", "type": "string"},
+    {"name": "airline", "type": "string"},
+    {"name": "airline_sentiment", "type": "string"},
+    {"name": "text", "type": "string"},
+    {"name": "retweet_count", "type": "int"},
+    {"name": "tweet_created", "type": "string"}
+  ]
+}"""
 
 
-# ── Kafka bağlantısı (retry ile) ────────────────────────────────────────────
-def create_kafka_consumer(max_retries: int = 30, retry_interval: int = 5) -> KafkaConsumer:
-    """Kafka broker hazır olana kadar yeniden bağlanmayı dener."""
+# -------- Kafka + Schema Registry bağlantısı (retry ile) ------------
+def create_consumer(max_retries: int = 30, retry_interval: int = 5):
+    """Kafka ve Schema Registry hazır olana kadar yeniden bağlanmayı dener."""
     for attempt in range(1, max_retries + 1):
         try:
-            consumer = KafkaConsumer(
-                KAFKA_TOPIC,
-                bootstrap_servers=KAFKA_BOOTSTRAP,
-                group_id=KAFKA_GROUP_ID,
-                auto_offset_reset="earliest",
-                enable_auto_commit=True,
-                value_deserializer=lambda m: m.decode("utf-8"),
+            # Schema Registry client
+            sr_client = SchemaRegistryClient({"url": SCHEMA_REGISTRY_URL})
+
+            # AVRO Deserializer
+            # Schema Registry şemayı biliyor, AvroDeserializer binary veriyi otomatik olarak Python dict'e çeviriyor.
+            avro_deserializer = AvroDeserializer(
+                schema_registry_client=sr_client,
+                schema_str=TWEET_SCHEMA,
             )
-            print(f"Connected to Kafka! (attempt {attempt})")
-            return consumer
-        except NoBrokerAvailable:
-            print(f"Kafka not ready, retrying... ({attempt}/{max_retries})")
+
+            # Kafka Consumer
+            consumer = Consumer({
+                "bootstrap.servers": KAFKA_BOOTSTRAP,
+                "group.id": KAFKA_GROUP_ID,
+                "auto.offset.reset": "earliest",
+            })
+            consumer.subscribe([KAFKA_TOPIC])
+
+            print(f"Connected to Kafka & Schema Registry! (attempt {attempt})")
+            return consumer, avro_deserializer
+
+        except Exception as e:
+            print(f"Not ready, retrying... ({attempt}/{max_retries}): {e}")
             time.sleep(retry_interval)
 
-    raise RuntimeError("Could not connect to Kafka after maximum retries")
+    raise RuntimeError("Could not connect after maximum retries")
 
 
-# ── Ana akış ─────────────────────────────────────────────────────────────────
+# ---------------- Ana akış -----------------------------
 def main():
-    print("Starting MongoDB Alert Consumer...")
+    print("Starting MongoDB Alert Consumer (AVRO)...")
 
     # MongoDB bağlantısı
     mongo_client = MongoClient(MONGO_URI)
@@ -115,30 +85,54 @@ def main():
     collection = db[MONGO_COLLECTION]
     print(f"Connected to MongoDB ({MONGO_DB}.{MONGO_COLLECTION})")
 
-    # Kafka consumer
-    consumer = create_kafka_consumer()
+    # Kafka consumer + AVRO deserializer
+    consumer, avro_deserializer = create_consumer()
 
     saved_count = 0
     skipped_count = 0
 
     print("Listening for tweet alerts...")
     try:
-        for message in consumer:
-            raw_value = message.value
-            parsed = parse_alert_message(raw_value)
+        while True:
+            msg = consumer.poll(timeout=1.0)
 
-            if parsed is None:
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"[ERROR] Kafka error: {msg.error()}")
+                continue
+
+            # AVRO mesajını deserialize et → Python dict
+            try:
+                tweet = avro_deserializer(
+                    msg.value(),
+                    SerializationContext(KAFKA_TOPIC, MessageField.VALUE),
+                )
+            except Exception as e:
+                print(f"[WARN] Deserialization failed: {e}")
                 skipped_count += 1
                 continue
 
-            # MongoDB'ye yazılma zamanı ekle
-            parsed["created_at"] = datetime.now(timezone.utc)
+            if tweet is None:
+                skipped_count += 1
+                continue
+
+            # MongoDB document'ı hazırla
+            doc = {
+                "tweet_id": tweet["tweet_id"],
+                "airline": tweet["airline"],
+                "airline_sentiment": tweet["airline_sentiment"],
+                "text": tweet["text"],
+                "retweet_count": tweet["retweet_count"],
+                "tweet_created": tweet["tweet_created"],
+                "created_at": datetime.now(timezone.utc),
+            }
 
             try:
                 # tweet_id üzerinden upsert: aynı tweet tekrar gelirse güncelle
                 collection.update_one(
-                    {"tweet_id": parsed["tweet_id"]},
-                    {"$set": parsed},
+                    {"tweet_id": doc["tweet_id"]},
+                    {"$set": doc},
                     upsert=True,
                 )
                 saved_count += 1
@@ -154,7 +148,6 @@ def main():
     except KeyboardInterrupt:
         print("Shutting down...")
     finally:
-        # Kafka consumer ve MongoDB bağlantılarını düzgün kapat
         consumer.close()
         mongo_client.close()
 
