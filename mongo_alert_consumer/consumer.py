@@ -52,10 +52,7 @@ def create_consumer(max_retries: int = 30, retry_interval: int = 5):
 
             # AVRO Deserializer
             # Schema Registry şemayı biliyor, AvroDeserializer binary veriyi otomatik olarak Python dict'e çeviriyor.
-            avro_deserializer = AvroDeserializer(
-                schema_registry_client=sr_client,
-                schema_str=TWEET_SCHEMA,
-            )
+            avro_deserializer = AvroDeserializer(schema_registry_client=sr_client, schema_str=TWEET_SCHEMA)
 
             # Kafka Consumer
             consumer = Consumer({

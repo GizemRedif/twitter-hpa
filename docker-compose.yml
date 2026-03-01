@@ -51,36 +51,22 @@ services:
       cub kafka-ready -b kafka:29092 1 30
 
       echo 'Creating tweets.raw topic...'
-      kafka-topics --create --if-not-exists \
-        --bootstrap-server kafka:29092 \
-        --topic tweets.raw \
-        --partitions 3 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --config cleanup.policy=delete
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic tweets.raw --partitions 3 --replication-factor 1 --config retention.ms=604800000 --config cleanup.policy=delete
 
       echo 'Creating tweets.alert topic...'
-      kafka-topics --create --if-not-exists \
-        --bootstrap-server kafka:29092 \
-        --topic tweets.alert \
-        --partitions 1 \
-        --replication-factor 1 \
-        --config retention.ms=86400000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic tweets.alert --partitions 1 --replication-factor 1 --config retention.ms=86400000
 
       echo 'Creating tweets.metrics topic...'
-      kafka-topics --create --if-not-exists \
-        --bootstrap-server kafka:29092 \
-        --topic tweets.metrics \
-        --partitions 2 \
-        --replication-factor 1 \
-        --config retention.ms=259200000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic tweets.metrics --partitions 2 --replication-factor 1 --config retention.ms=259200000
 
       echo 'Topics created!'
       kafka-topics --list --bootstrap-server kafka:29092
       "
     restart: "no"
 
-  # Confluent Schema Registry: AVRO şema yönetimi için kullanılır.
+  # Merkezi Confluent Schema Registry: AVRO şema yönetimi için kullanılır.
+  # İç Ağ Adresi (Konteynerler arası): http://schema-registry:8081
+  # Dış Ağ Adresi (Senin bilgisayarından): http://localhost:8083
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
     container_name: schema-registry
@@ -117,15 +103,18 @@ services:
       POSTGRES_DB: airflow
     ports:
       - "5432:5432"
+    volumes:
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/init-metrics.sql:ro
 
   mongo:
-    image: mongo:6
+    image: mongo:7
     container_name: mongo
     ports:
-      - "27017:27017"
+      - "27018:27017"
     volumes:
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
 
+  # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   mongo-alert-consumer:
     build: ./mongo_alert_consumer
     container_name: mongo-alert-consumer
@@ -138,6 +127,7 @@ services:
       PYTHONUNBUFFERED: "1"
     restart: on-failure
 
+  # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   mongo-raw-consumer:
     build: ./mongo_raw_consumer
     container_name: mongo-raw-consumer
@@ -149,6 +139,24 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
     restart: on-failure
+
+  # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
+  pg-metrics-consumer:
+    build: ./pg_metrics_consumer
+    container_name: pg-metrics-consumer
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: on-failure
+
+  # Yukarıdaki consumerlar için:
+  # docker-compose up komutu verildiğinde Docker, önce o klasörlerden imageleri build eder
+  # Sonra o imajlardan konteynerleri yaratır.
+  # En son depends_on kısmına bakarak, önce Schema Registry'nin "sağlıklı" (healthy) olmasını bekler, sonra senin consumer'larını çalıştırır.
 
   airflow:
     image: apache/airflow:2.7.1
@@ -173,27 +181,42 @@ services:
         --email admin@example.com &&
       airflow webserver & airflow scheduler "
 
-  #Flink master node, işleri yönetir (Web UI 8082)
+  # ============================================================
+  # Flink JobManager (master node)
+  # ============================================================
+  # İşleri koordine eden ana node. Web UI 8082 portunda çalışır.
+  # Dockerfile ile Maven build yapılır → fat JAR otomatik eklenir.
+  # docker-entrypoint-override.sh ile job otomatik submit edilir.
+  # Böylece "docker compose up --build" tek komutla her şey başlar.
   flink-jobmanager:
-    image: flink:1.18
+    build: ./flink-tweets-stream
     container_name: flink-jobmanager
     ports:
       - "8082:8081"
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-    command: jobmanager
+    # Özel entrypoint: JobManager başlat → REST API bekle → job submit et
+    entrypoint: [ "/bin/bash", "/opt/flink/usrlib/docker-entrypoint-override.sh" ]
     depends_on:
-      - kafka
+      schema-registry:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
 
-  #Flink worker node, işleri yapar
+  # ============================================================
+  # Flink TaskManager (worker node)
+  # ============================================================
+  # Gerçek veri işleme bu node'da yapılır.
+  # JobManager ile aynı image'ı kullanır (JAR + bağımlılık tutarlılığı için).
+  # Task slot sayısı: 2 → bu worker aynı anda 2 paralel görev çalıştırabilir. (Task)
   flink-taskmanager:
-    image: flink:1.18
+    build: ./flink-tweets-stream
     container_name: flink-taskmanager
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
+        taskmanager.numberOfTaskSlots: 2    
     command: taskmanager
     depends_on:
       - flink-jobmanager
