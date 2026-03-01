@@ -27,6 +27,8 @@ Lambda architecture tamamlandığında bir bulut ortamına (büyük ihtimalle Di
 
 ## Mimari Akış
 
+![Data Flow Diagram](Data%20Flow%20Diagram%20-%20DFD.png)
+
 ### 1. Veri Üretimi ve Entegrasyon (Ingestion)
 - **Producer:** Python tabanlı `kafka-producer`, ham tweet verilerini (Tweets.csv) okur.
 - **Serialization:** Veriler, Confluent Schema Registry üzerindeki **Avro** şemasına göre serialize edilir. Bu işlem, verinin ağ üzerinde en az yer kaplayacak şekilde (binary) iletilmesini sağlar.
