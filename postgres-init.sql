@@ -25,3 +25,24 @@ CREATE TABLE tweet_metrics (
     window_end      TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW()
 );
+
+-- =============================================
+-- Batch Layer (PySpark) sonuçları için  
+-- Speed Layer ile aynı yapı, farklı window (1 saat)
+-- =============================================
+CREATE TABLE batch_tweet_metrics (
+    id              SERIAL PRIMARY KEY,
+    airline         VARCHAR(100) NOT NULL,
+    tweet_count     BIGINT,
+    positive_count  BIGINT,
+    negative_count  BIGINT,
+    neutral_count   BIGINT,
+    positive_ratio  DOUBLE PRECISION,
+    negative_ratio  DOUBLE PRECISION,
+    avg_retweet     DOUBLE PRECISION,
+    max_retweet     BIGINT,
+    tweet_rate      DOUBLE PRECISION,
+    window_start    VARCHAR(50),
+    window_end      VARCHAR(50),
+    created_at      TIMESTAMP DEFAULT NOW()
+);

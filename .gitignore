@@ -10,13 +10,10 @@ __pycache__/
 *.war
 dependency-reduced-pom.xml
 
-# Logs
 *.log
-
-# IDE
-.gemini/
 .vscode/
 .idea/
+.gemini/
 *.iml
 .project
 .classpath

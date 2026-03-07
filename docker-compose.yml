@@ -181,6 +181,8 @@ services:
         --email admin@example.com &&
       airflow webserver & airflow scheduler "
 
+  # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
   # ============================================================
   # Flink JobManager (master node)
   # ============================================================
@@ -220,3 +222,72 @@ services:
     command: taskmanager
     depends_on:
       - flink-jobmanager
+
+  # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  # ============================================================
+  # Spark Submit (Batch job çalıştırıcı - one-shot)
+  # ============================================================
+  # Job'u master'a gönderen container. "Şu scripti (batch_job.py) çalıştır" diyen istemci.
+  # MongoDB'den ham verileri okuyup batch metrikleri hesaplar.
+  # Sonuçları PostgreSQL ve Parquet olarak yazar.
+  # Job bitince container durur (restart: "no").
+  spark-submit:
+    build: ./spark
+    container_name: spark-submit
+    environment:
+      SPARK_MODE: worker
+    volumes:
+      - ./data/batch_output:/opt/spark-data/batch_output
+    # Entrypoint override: spark-submit komutu çalıştırır
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        echo "Waiting for MongoDB and PostgreSQL to be ready..."
+        sleep 30
+        echo "Submitting PySpark Batch Job..."
+        /opt/bitnami/spark/bin/spark-submit \
+          --master spark://spark-master:7077 \
+          --deploy-mode client \
+          /opt/spark-jobs/batch_job.py
+        echo "Batch job completed!"
+    depends_on:
+      - spark-master
+      - spark-worker
+      - mongo
+      - postgres
+    restart: "no"
+
+  # ============================================================
+  # Spark Master (Batch Layer - ana node)
+  # ============================================================
+  # Job'ları worker'lara dağıtır. Kendisi iş yapmaz.
+  # Web UI 8084 portunda çalışır. 
+  spark-master:
+    build: ./spark
+    container_name: spark-master
+    ports:
+      - "8084:8080"
+    environment:
+      SPARK_MODE: master
+
+  # ============================================================
+  # Spark Worker (Batch Layer - worker node)
+  # ============================================================
+  # Asıl veri işleme burada yapılır (CPU + bellek kullanır).
+  # 1 core ve 1G memory ile çalışır.
+  spark-worker:
+    build: ./spark
+    container_name: spark-worker
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: 1
+      SPARK_WORKER_MEMORY: 1G
+    depends_on:
+      - spark-master
+
+# Kısaca:
+# spark-submit - job'u gönderir (tetikler)
+# spark-worker - job'u çalıştırır (işler)
+# spark-master - ikisi arasında koordine eder
