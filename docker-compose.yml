@@ -98,8 +98,8 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: airflow
     ports:
       - "5432:5432"
@@ -151,6 +151,8 @@ services:
         condition: service_started
     environment:
       PYTHONUNBUFFERED: "1"
+    env_file:
+      - .env
     restart: on-failure
 
   # Yukarıdaki consumerlar için:
@@ -165,21 +167,14 @@ services:
       - postgres
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     ports:
       - "8081:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
     command: >
-      bash -c " airflow db init && airflow users create
-        --username admin
-        --password admin
-        --firstname admin
-        --lastname admin
-        --role Admin
-        --email admin@example.com &&
-      airflow webserver & airflow scheduler "
+      bash -c "airflow db init &&  airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname airflow --lastname airflow --role Admin --email ${AIRFLOW_EMAIL} &&  airflow webserver & airflow scheduler"
 
   # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -235,10 +230,10 @@ services:
   spark-submit:
     build: ./spark
     container_name: spark-submit
-    environment:
-      SPARK_MODE: worker
     volumes:
       - ./data/batch_output:/opt/spark-data/batch_output
+    env_file:
+      - .env
     # Entrypoint override: spark-submit komutu çalıştırır
     entrypoint: [ "/bin/bash", "-c" ]
     command:
@@ -246,7 +241,7 @@ services:
         echo "Waiting for MongoDB and PostgreSQL to be ready..."
         sleep 30
         echo "Submitting PySpark Batch Job..."
-        /opt/bitnami/spark/bin/spark-submit \
+        /opt/spark/bin/spark-submit \
           --master spark://spark-master:7077 \
           --deploy-mode client \
           /opt/spark-jobs/batch_job.py
@@ -268,8 +263,7 @@ services:
     container_name: spark-master
     ports:
       - "8084:8080"
-    environment:
-      SPARK_MODE: master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
 
   # ============================================================
   # Spark Worker (Batch Layer - worker node)
@@ -280,10 +274,9 @@ services:
     build: ./spark
     container_name: spark-worker
     environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
       SPARK_WORKER_CORES: 1
       SPARK_WORKER_MEMORY: 1G
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
 

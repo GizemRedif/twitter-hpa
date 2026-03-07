@@ -12,6 +12,7 @@ from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 from confluent_kafka.serialization import SerializationContext, MessageField
 import psycopg2
+import os
 
 
 # -------- Ayarlar ------------
@@ -23,9 +24,9 @@ SCHEMA_REGISTRY_URL = "http://schema-registry:8081"
 
 PG_HOST = "postgres"
 PG_PORT = 5432
-PG_DB = "twitter_metrics"
-PG_USER = "airflow"
-PG_PASSWORD = "airflow"
+PG_DB = os.environ.get("POSTGRES_DB", "twitter_metrics")
+PG_USER = os.environ.get("POSTGRES_USER", "admin")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
 
 # AVRO şeması: TweetMetrics yapısı (DataStreamJob'daki metricsSchema ile aynı)
 METRICS_SCHEMA = """{

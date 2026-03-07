@@ -12,6 +12,7 @@ Kullanım:
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import TimestampType
+import shutil, os
 
 
 # -------- Ayarlar --------
@@ -19,10 +20,10 @@ MONGO_URI = "mongodb://mongo:27017"
 MONGO_DB = "twitter_hpa"
 MONGO_COLLECTION = "tweets_raw"
 
-PG_URL = "jdbc:postgresql://postgres:5432/twitter_metrics"
+PG_URL = "jdbc:postgresql://postgres:5432/" + os.environ.get("POSTGRES_DB", "twitter_metrics")
 PG_TABLE = "batch_tweet_metrics"
-PG_USER = "airflow"
-PG_PASSWORD = "airflow"
+PG_USER = os.environ.get("POSTGRES_USER", "admin")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
 
 PARQUET_OUTPUT_PATH = "/opt/spark-data/batch_output"
 
@@ -34,6 +35,7 @@ def create_spark_session():
         SparkSession.builder
         .appName("Twitter HPA - Batch Layer")
         .config("spark.mongodb.read.connection.uri", f"{MONGO_URI}/{MONGO_DB}.{MONGO_COLLECTION}")
+        .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
         .getOrCreate()   # Zaten bir session varsa onu kullanır, yoksa yenisini oluşturur.
     )
 
@@ -44,8 +46,7 @@ def read_from_mongodb(spark):
 
     # MongoDB'deki tweets_raw koleksiyonundaki tüm ham tweetleri bir Spark DataFrame'e yükler.
     df = (
-        spark.read
-        .format("mongodb")
+        spark.read.format("mongodb")
         .option("connection.uri", f"{MONGO_URI}/{MONGO_DB}.{MONGO_COLLECTION}")
         .load()
     )
@@ -103,6 +104,7 @@ def transform_and_compute_metrics(df):
         .withColumn("negative_ratio", F.when(F.col("tweet_count") > 0, F.col("negative_count") / F.col("tweet_count")).otherwise(0.0))
         # Tweet rate: tweet sayısı / 60 dakika
         .withColumn("tweet_rate", F.col("tweet_count") / F.lit(60.0))
+        
         # Window Alanlarını Düzleştirme - Flatten (Neden yapıldığı en altta)
         .withColumn("window_start", F.col("window.start").cast("string"))
         .withColumn("window_end", F.col("window.end").cast("string"))
@@ -119,6 +121,7 @@ def write_to_postgresql(metrics_df):
     print("[INFO] Writing to PostgreSQL...")
 
     # Hesaplanan metrikleri JDBC ile PostgreSQL'deki batch_tweet_metrics tablosuna yazar. 
+    # JDBC (Java Database Connectivity): Java uygulamalarının veritabanlarına bağlanmasını sağlayan standart API’dir.
     (
         metrics_df.write.format("jdbc")
         .option("url", PG_URL)
@@ -135,12 +138,38 @@ def write_to_postgresql(metrics_df):
 
 def write_to_parquet(metrics_df):
     """Batch metriklerini Parquet formatında airline bazlı partition'layarak yazar."""
+    # Parquet: Sütun bazlı (columnar) bir dosya formatıdır. CSV'ye kıyasla:
+    # - Çok daha hızlı okuma (sadece ihtiyaç duyulan sütunlar okunur)
+    # - Çok daha küçük dosya boyutu (Snappy sıkıştırma ile)
+    # - Büyük veri araçları (Spark, Hive, Presto) ile doğrudan uyumlu
     print(f"[INFO] Writing to Parquet: {PARQUET_OUTPUT_PATH}")
 
-    # Hesaplanan aynı metrikleri Parquet formatında diske yazar.
+    # --- Eski Parquet çıktılarını temizle ---
+    # write.mode("overwrite") yerine write.mode("append") kullanıp manuel temizleme yapıyoruz. Nedenleri:
+    # Spark'ın overwrite modu çıktı dizininin TAMAMINI silmeye çalışır.
+    # Ancak /opt/spark-data/batch_output dizini Docker volume mount noktası olduğu için silinemez ("Device or resource busy" hatası verir).
+    # Çözüm: Kök dizini olduğu gibi bırakıp sadece içindeki alt dosya/dizinleri temizle.
+    if os.path.exists(PARQUET_OUTPUT_PATH):
+        for item in os.listdir(PARQUET_OUTPUT_PATH):
+            item_path = os.path.join(PARQUET_OUTPUT_PATH, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)    # airline=American/ gibi partition dizinlerini sil
+            else:
+                os.remove(item_path)        # _SUCCESS gibi dosyaları sil
+
+    # --- Parquet olarak diske yaz ---
+    # mode("append"): Mevcut dizine ekleme yapar, dizini silmeye çalışmaz.
+    # (Yukarıda manuel temizleme yaptığımız için sonuç overwrite ile aynı. Sanki eski içeriğin üzerine yazılıyor gibi yani)
+    # partitionBy("airline"): Her airline değeri için ayrı alt dizin oluşturur:
+    #   batch_output/
+    #   ├── airline=American/part-00000.snappy.parquet
+    #   ├── airline=United/part-00000.snappy.parquet
+    #   ├── airline=Delta/part-00000.snappy.parquet
+    #   └── ...
+    # Bu yapı sayesinde "sadece Delta'nın verisini getir" gibi sorgularda Spark yalnızca airline=Delta/ dizinini okur ve işlem hızlı olur (partition pruning).
     (
-        metrics_df.write.mode("overwrite")       # Her batch çalışmasında üzerine yaz
-        .partitionBy("airline")                  # Airline bazlı partition sayesinde her airline için ayrı klasör oluşur. (Bu yapı büyük veri sorgularında çok hızlı filtreleme sağlar)
+        metrics_df.write.mode("append")
+        .partitionBy("airline")
         .parquet(PARQUET_OUTPUT_PATH)
     )
 

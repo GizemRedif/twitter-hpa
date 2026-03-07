@@ -1,20 +1,33 @@
 # Python
 __pycache__/
 *.pyc
+
+# Environment Files
 .env
 
-# Java / Maven
+# Data & Output (Ignored to avoid pushing large metrics/parquet data)
+data/
+batch_output/
+*.csv
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# Flink/Java
 **/target/
 *.class
 *.jar
 *.war
 dependency-reduced-pom.xml
 
-*.log
+# IDEs & OS
 .vscode/
 .idea/
-.gemini/
 *.iml
 .project
+.gemini/
 .classpath
 .settings/
+*.log
+.DS_Store

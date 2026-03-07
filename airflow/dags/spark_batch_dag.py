@@ -40,7 +40,7 @@ with DAG(
         task_id="run_spark_batch_job",
         bash_command=(
             "docker exec spark-submit "                 # Zaten çalışan spark-submit container'ına bağlanır
-            "/opt/bitnami/spark/bin/spark-submit "      # Spark'ın submit komutunu çalıştırır
+            "/opt/spark/bin/spark-submit "              # Spark'ın submit komutunu çalıştırır
             "--master spark://spark-master:7077 "       # Job'u Spark master'a gönderir
             "--deploy-mode client "                     # Driver, submit eden makinede çalışır (cluster modu değil)
             "/opt/spark-jobs/batch_job.py"              # Çalıştırılacak PySpark scripti (batch_job.py)
