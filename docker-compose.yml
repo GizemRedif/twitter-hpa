@@ -128,14 +128,14 @@ services:
     restart: on-failure
 
   # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
-  mongo-raw-consumer:
-    build: ./mongo_raw_consumer
-    container_name: mongo-raw-consumer
+  parquet-raw-consumer:
+    build: ./parquet_raw_consumer
+    container_name: parquet-raw-consumer
     depends_on:
       schema-registry:
         condition: service_healthy
-      mongo:
-        condition: service_started
+    volumes:
+      - ./data/raw_tweets:/app/data/raw_tweets
     environment:
       PYTHONUNBUFFERED: "1"
     restart: on-failure
@@ -174,7 +174,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
     command: >
-      bash -c "airflow db init &&  airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname airflow --lastname airflow --role Admin --email ${AIRFLOW_EMAIL} &&  airflow webserver & airflow scheduler"
+      bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname airflow --lastname airflow --role Admin --email ${AIRFLOW_EMAIL} && { airflow webserver & exec airflow scheduler; }"
 
   # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -231,6 +231,7 @@ services:
     build: ./spark
     container_name: spark-submit
     volumes:
+      - ./data/raw_tweets:/opt/spark-data/raw_tweets
       - ./data/batch_output:/opt/spark-data/batch_output
     env_file:
       - .env
@@ -263,6 +264,9 @@ services:
     container_name: spark-master
     ports:
       - "8084:8080"
+    volumes:
+      - ./data/raw_tweets:/opt/spark-data/raw_tweets
+      - ./data/batch_output:/opt/spark-data/batch_output
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
 
   # ============================================================
@@ -276,6 +280,9 @@ services:
     environment:
       SPARK_WORKER_CORES: 1
       SPARK_WORKER_MEMORY: 1G
+    volumes:
+      - ./data/raw_tweets:/opt/spark-data/raw_tweets
+      - ./data/batch_output:/opt/spark-data/batch_output
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master

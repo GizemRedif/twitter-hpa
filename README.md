@@ -22,6 +22,7 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 | Şema Yönetimi | Confluent Schema Registry (Avro) |
 | Veri Depolama (NoSQL) | MongoDB 7.0 |
 | Veri Depolama (RDBMS) | PostgreSQL 15 |
+| Veri Depolama (Data Lake) | Apache Parquet (Snappy ile sıkıştırma) |
 | Konteynerleştirme | Docker & Docker Compose |
 
 ---
@@ -46,12 +47,13 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
   - Dakikalık istatistikler (tweet sayısı, ortalama retweet vb.) → `tweets.metrics` topic'i
  
 #### 4. Toplu İşleme Katmanı (Batch Layer)
-- **PySpark Job:** `spark/batch_job.py`, MongoDB'deki ham tweet verilerini (`tweets_raw`) periyodik olarak okur ve 1 saatlik pencereler bazında toplu analizler üretir.
+- **Parquet Raw Consumer:** Kafka'daki `tweets.raw` topic'ini dinler ve ham tweetleri **Parquet** formatında Data Lake'e yazar. Bu yapı Lambda Mimarisi'ndeki "Immutable Master Dataset" (Değiştirilemez Ana Veri Seti) konseptini sağlar.
+- **PySpark Job:** `spark/batch_job.py`, Data Lake'teki (Parquet formatındaki) ham tweet verilerini periyodik olarak okur ve 1 saatlik pencereler bazında toplu analizler üretir.
 - **Airflow DAG:** `airflow/dags/` altındaki DAG, PySpark işini zamanlanmış (scheduled) biçimde tetikler ve orkestre eder.
 
 #### 5. Sunum Katmanı — Depolama ve Tüketim (Serving Layer)
 - **Consumers:** Python consumer'ları Kafka'dan gelen sonuçları kalıcı depolara yazar:
-  - **MongoDB:** Ham tweet yedekleri (`tweets_raw`) ve kritik uyarılar (`tweet_alerts`) saklanır
+  - **MongoDB:** Kritik uyarılar (`tweet_alerts`) saklanır
   - **PostgreSQL:** Analitik metrikler hem hız katmanından (`tweet_metrics`) hem de toplu işleme katmanından (`batch_tweet_metrics`) gelen verilerle burada saklanır.
 - **Spark Output:** PySpark job sonuçları hem PostgreSQL'e yazar hem de uzun süreli saklama için **Parquet** formatında dosya sistemine (Data Lake) arşivler.
 
@@ -88,10 +90,10 @@ docker compose down -v
 
 > **Not:** Sistem genelindeki kullanıcı adı/şifre bilgileri projenin ana dizinindeki `.env` dosyasından yönetilmektedir. Değişiklik yaptığınızda servisleri yeniden başlatmanız (`docker compose up`) yeterlidir.
 
-#### MongoDB (Ham Veriler ve Alertler)
+#### MongoDB (Alertler)
 - **Adres:** `mongodb://localhost:27018`
 - **Veritabanı:** `twitter_hpa`
-- **Koleksiyonlar:** `tweets_raw`, `tweet_alerts`
+- **Koleksiyonlar:** `tweet_alerts`
 
 #### PostgreSQL (Analitik Metrikler)
 - **Adres:** `localhost:5432`
@@ -114,10 +116,11 @@ docker compose down -v
 #### Spark Master UI
 - **Adres:** [http://localhost:8084](http://localhost:8084)
 
-#### Data Lake / Arşiv (Parquet)
-- **Konum:** `/opt/spark-data/batch_output` (Konteyner içi) / `./data/batch_output` (Host cihaz)
+#### Data Lake (Parquet)
+- **Ham Veri (Girdi):** `/opt/spark-data/raw_tweets` (Konteyner içi) / `./data/raw_tweets` (Host cihaz)
+- **Batch Çıktı (Arşiv):** `/opt/spark-data/batch_output` (Konteyner içi) / `./data/batch_output` (Host cihaz)
 - **Format:** Snappy Sıkıştırılmış Parquet
-- **Partition Yapısı:** `airline` bazlı klasörleme (Partitioning)
+- **Partition Yapısı (Çıktı):** `airline` bazlı klasörleme (Partitioning)
 
 ---
 

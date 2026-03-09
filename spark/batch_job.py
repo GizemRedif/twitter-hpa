@@ -1,24 +1,23 @@
 """
 PySpark Batch Layer — Twitter HPA Lambda Architecture 
 
-MongoDB'deki tweets_raw koleksiyonundan ham tweet verilerini okur,
+Data Lake'teki (Parquet formatındaki) ham tweet verilerini okur,
 1 saatlik pencereler halinde airline bazlı batch metrikleri hesaplar
 ve sonuçları hem PostgreSQL'e hem Parquet dosyalarına yazar.
 
 Kullanım:
-    spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.12:10.4.0,org.postgresql:postgresql:42.7.4 batch_job.py
+    spark-submit --packages org.postgresql:postgresql:42.7.4 batch_job.py
 """
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import TimestampType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
 import shutil, os
 
 
 # -------- Ayarlar --------
-MONGO_URI = "mongodb://mongo:27017"
-MONGO_DB = "twitter_hpa"
-MONGO_COLLECTION = "tweets_raw"
+# Ham tweet verilerinin Parquet formatında saklandığı dizin (Data Lake)
+RAW_PARQUET_PATH = "/opt/spark-data/raw_tweets"
 
 PG_URL = "jdbc:postgresql://postgres:5432/" + os.environ.get("POSTGRES_DB", "twitter_metrics")
 PG_TABLE = "batch_tweet_metrics"
@@ -34,26 +33,46 @@ def create_spark_session():
     return (
         SparkSession.builder
         .appName("Twitter HPA - Batch Layer")
-        .config("spark.mongodb.read.connection.uri", f"{MONGO_URI}/{MONGO_DB}.{MONGO_COLLECTION}")
         .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+        .config("spark.sql.files.ignoreMissingFiles", "true")
+        .config("spark.sql.files.ignoreCorruptFiles", "true")
+        .config("spark.sql.parquet.cacheMetadata", "false")
         .getOrCreate()   # Zaten bir session varsa onu kullanır, yoksa yenisini oluşturur.
     )
 
 
-def read_from_mongodb(spark):
-    """MongoDB tweets_raw koleksiyonundan ham tweet verilerini okur."""
-    print("[INFO] Reading the tweets_raw collection from MongoDB...")
+def get_raw_tweet_schema():
+    """Ham Parquet dosyaları için beklenen şema."""
+    return StructType([
+        StructField("tweet_id", StringType(), True),
+        StructField("airline", StringType(), True),
+        StructField("airline_sentiment", StringType(), True),
+        StructField("text", StringType(), True),
+        StructField("retweet_count", IntegerType(), True),
+        StructField("tweet_created", StringType(), True),
+        StructField("ingested_at", StringType(), True)
+    ])
 
-    # MongoDB'deki tweets_raw koleksiyonundaki tüm ham tweetleri bir Spark DataFrame'e yükler.
+
+def read_from_parquet(spark):
+    """Data Lake'teki (Parquet formatındaki) ham tweet verilerini okur."""
+    print(f"[INFO] Reading raw tweets from Parquet: {RAW_PARQUET_PATH}")
+
+    # recursiveFileLookup: Spark'ın sildiğimiz eski dosyaları bellekte tutup FileNotFoundException
+    # atmasını engellemek için dizini tekrar taramasını sağlar.
+    schema = get_raw_tweet_schema()
+    
     df = (
-        spark.read.format("mongodb")
-        .option("connection.uri", f"{MONGO_URI}/{MONGO_DB}.{MONGO_COLLECTION}")
-        .load()
+        spark.read
+        .schema(schema)
+        .option("pathGlobFilter", "*.parquet")
+        .option("recursiveFileLookup", "true")
+        .parquet(RAW_PARQUET_PATH)
     )
 
     # Kaç tweet okunduğunu loglar.
     row_count = df.count()
-    print(f"[INFO] {row_count} tweets read from MongoDB.")
+    print(f"[INFO] {row_count} tweets read from Parquet (Data Lake).")
     return df
 
 
@@ -180,7 +199,7 @@ def write_to_parquet(metrics_df):
 def main():
     print("=" * 60)
     print("  Twitter HPA - PySpark Batch Layer")
-    print("  MongoDB -> Calculate Metrics -> PostgreSQL + Parquet")
+    print("  Parquet (Data Lake) -> Calculate Metrics -> PostgreSQL + Parquet")
     print("=" * 60)
 
     # 1. SparkSession oluştur
@@ -188,8 +207,8 @@ def main():
     print(f"[INFO] SparkSession created: {spark.sparkContext.appName}")
 
     try:
-        # 2. MongoDB'den oku (ham tweet verilerini)
-        raw_df = read_from_mongodb(spark)
+        # 2. Data Lake'ten oku (Parquet formatındaki ham tweet verileri)
+        raw_df = read_from_parquet(spark)
 
         # 3. Metrikleri hesapla (1 saatlik pencereler, airline bazlı)
         metrics_df = transform_and_compute_metrics(raw_df)
