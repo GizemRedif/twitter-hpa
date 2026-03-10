@@ -286,8 +286,28 @@ services:
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
+  # Kısaca:
+  # spark-submit - job'u gönderir (tetikler)
+  # spark-worker - job'u çalıştırır (işler)
+  # spark-master - ikisi arasında koordine eder 
 
-# Kısaca:
-# spark-submit - job'u gönderir (tetikler)
-# spark-worker - job'u çalıştırır (işler)
-# spark-master - ikisi arasında koordine eder
+
+
+  # ============================================================
+  # Data Quality Check (Veri Kalite Kontrol - one-shot)
+  # ============================================================
+  # Parquet Data Lake, PostgreSQL ve MongoDB'deki verilerin kalite kontrolünü yapan container. Job bitince container durur.
+  # Kontroller: Şema doğrulama, null kontrolü, sentiment tutarlılığı, oran aralıkları, duplicate tespiti, toplam tutarlılık. 
+  data-quality-check:
+    build: ./data_quality
+    container_name: data-quality-check
+    volumes:
+      - ./data/raw_tweets:/app/data/raw_tweets # senin bilgisayarındaki data/raw_tweets/ klasörü, container'ın içinden /app/data/raw_tweets/ olarak erişilebilir oluyor. İki yönlü bağlantı — biri değişirse diğeri de değişir.
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      - postgres
+      - mongo
+    restart: "no"

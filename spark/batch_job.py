@@ -11,7 +11,7 @@ Kullanım:
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType
 import shutil, os
 
 
@@ -48,7 +48,7 @@ def get_raw_tweet_schema():
         StructField("airline", StringType(), True),
         StructField("airline_sentiment", StringType(), True),
         StructField("text", StringType(), True),
-        StructField("retweet_count", IntegerType(), True),
+        StructField("retweet_count", LongType(), True),
         StructField("tweet_created", StringType(), True),
         StructField("ingested_at", StringType(), True)
     ])

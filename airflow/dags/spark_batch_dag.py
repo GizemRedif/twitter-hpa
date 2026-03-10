@@ -47,13 +47,30 @@ with DAG(
         ),
     )
 
-    run_spark_batch
+
+
+ # ----------------------- Data Quality Check ----------------------
+    # Batch job sonrası çalışacak task 
+    # Veri Kalite Kontrol: Batch job tamamlandıktan sonra tüm veri katmanlarını doğrular.
+    # Parquet (Data Lake), PostgreSQL (Speed + Batch), MongoDB (Alerts) kontrol edilir.
+    # Kontrol başarısız olursa task FAIL olur ve Airflow UI'da görünür.
+    run_data_quality_check = BashOperator(
+        task_id="run_data_quality_check", 
+        bash_command=(
+            "docker exec data-quality-check "   # Zaten çalışan data-quality-check container'ına bağlanır
+            "python dq_check.py"                 # /data_quality/dq_check.py script'ini çalıştırır
+        ),
+    )
+
+    # Akış: Spark Batch Job → Veri Kalite Kontrol
+    run_spark_batch >> run_data_quality_check
 
 
 # AKIŞ ÖZETİ
 # Her saat başı Airflow tetikler
-# BashOperator → docker exec spark-submit 
-# spark-submit → spark-master:7077
-# batch_job.py çalışır: MongoDB (ham tweetler) → Metrik Hesaplama → PostgreSQL + Parquet
+# 1. BashOperator → docker exec spark-submit → batch_job.py çalışır
+# 2. BashOperator → docker compose run data-quality-check → dq_check.py çalışır
+# batch_job.py: Data Lake (Parquet) → Metrik Hesaplama → PostgreSQL + Parquet
+# dq_check.py: Parquet + PostgreSQL + MongoDB veri kalite kontrolü
 
 
