@@ -42,7 +42,26 @@ CREATE TABLE batch_tweet_metrics (
     avg_retweet     DOUBLE PRECISION,
     max_retweet     BIGINT,
     tweet_rate      DOUBLE PRECISION,
-    window_start    VARCHAR(50),
-    window_end      VARCHAR(50),
+    window_start    TIMESTAMP,
+    window_end      TIMESTAMP,
     created_at      TIMESTAMP DEFAULT NOW()
 );
+
+-- =============================================
+-- Unified Serving Layer View
+-- Speed Layer (tweet_metrics) + Batch Layer (batch_tweet_metrics)
+-- Batch layer has the "truth", Speed layer provides the most recent "delta"
+-- =============================================
+CREATE OR REPLACE VIEW unified_metrics AS
+SELECT 
+    airline, tweet_count, positive_count, negative_count, neutral_count,
+    positive_ratio, negative_ratio, avg_retweet, max_retweet,
+    tweet_rate, window_start, window_end, 'BATCH' as source
+FROM batch_tweet_metrics
+UNION ALL
+SELECT 
+    airline, tweet_count, positive_count, negative_count, neutral_count,
+    positive_ratio, negative_ratio, avg_retweet, max_retweet,
+    tweet_rate, window_start, window_end, 'REAL-TIME' as source
+FROM tweet_metrics
+WHERE window_start >= COALESCE((SELECT MAX(window_end) FROM batch_tweet_metrics), '1970-01-01');

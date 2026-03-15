@@ -11,6 +11,9 @@ USER root
 RUN curl -L -o /opt/spark/jars/postgresql-42.7.4.jar \
     https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
 
+# Deletion/Pruning işlemleri için psycopg2-binary kur
+RUN pip install --no-cache-dir psycopg2-binary
+
 # Spark veri dizinlerini oluştur
 # raw_tweets: Data Lake'ten okunan ham Parquet dosyaları (girdi)
 # batch_output: Hesaplanan metriklerin Parquet çıktısı

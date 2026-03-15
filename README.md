@@ -29,7 +29,7 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 ---
 
 ### Mimari Akış
-![Data Flow Diagram](Data%20Flow%20Diagram%20-%20DFD.png)
+![Architecture - Data Flow Diagram](Architecture%20-%20Data%20Flow%20Diagram.jpeg)
 
 #### 1. Veri Üretimi ve Entegrasyon (Ingestion)
 - **Producer:** Python tabanlı `kafka-producer`, ham tweet verilerini (`Tweets.csv`) okur.
@@ -54,8 +54,10 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 
 #### 5. Sunum Katmanı — Depolama ve Tüketim (Serving Layer)
 - **Consumers:** Python consumer'ları Kafka'dan gelen sonuçları kalıcı depolara yazar:
-  - **MongoDB:** Kritik uyarılar (`tweet_alerts`) saklanır
+  - **MongoDB:** Kritik uyarılar (`tweet_alerts`) saklanır.
   - **PostgreSQL:** Analitik metrikler hem hız katmanından (`tweet_metrics`) hem de toplu işleme katmanından (`batch_tweet_metrics`) gelen verilerle burada saklanır.
+- **Unified View:** PostgreSQL'deki `unified_metrics` view'ı, batch ve real-time verileri otomatik olarak birleştirir. Batch verisi mevcutsa onu, henüz işlenmemiş son veriler için ise real-time veriyi sunar.
+- **Lambda Loop (Pruning):** Batch job başarıyla tamamlandığında, `tweet_metrics` tablosundaki eski (redundant) verileri temizleyerek "re-computation" döngüsünü tamamlar.
 - **Spark Output:** PySpark job sonuçları hem PostgreSQL'e yazar hem de uzun süreli saklama için **Parquet** formatında dosya sistemine (Data Lake) arşivler.
 
 #### 6. Otomasyon (Infrastructure as Code)
@@ -102,6 +104,7 @@ docker compose down -v
 - **Veritabanı:** `twitter_metrics`
 - **Tablo:** `tweet_metrics` (Speed Layer)
 - **Tablo:** `batch_tweet_metrics` (Batch Layer)
+- **Görünüm (View):** `unified_metrics` (Unified Serving Layer)
 
 #### Flink Dashboard
 - **Adres:** [http://localhost:8082](http://localhost:8082)

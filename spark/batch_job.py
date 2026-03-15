@@ -13,6 +13,7 @@ from pyspark.sql import SparkSession # type: ignore
 from pyspark.sql import functions as F # type: ignore
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType # type: ignore
 import shutil, os
+import psycopg2 # type: ignore
 
 
 # -------- Ayarlar --------
@@ -125,8 +126,8 @@ def transform_and_compute_metrics(df):
         .withColumn("tweet_rate", F.col("tweet_count") / F.lit(60.0))
         
         # Window Alanlarını Düzleştirme - Flatten (Neden yapıldığı en altta)
-        .withColumn("window_start", F.col("window.start").cast("string"))
-        .withColumn("window_end", F.col("window.end").cast("string"))
+        .withColumn("window_start", F.col("window.start"))
+        .withColumn("window_end", F.col("window.end"))
         .drop("window")  # window struct kolonunu kaldır, düz kolonlarla devam et
     )
 
@@ -153,6 +154,49 @@ def write_to_postgresql(metrics_df):
     )
 
     print("[INFO] PostgreSQL write completed.")
+
+
+def prune_speed_layer(spark, metrics_df):
+    """
+    Batch job başarıyla tamamlandıktan sonra, batch'e giren eski verileri 
+    Speed Layer (PostgreSQL - tweet_metrics) tablosundan temizler.
+    Bu, Lambda mimarisinde 'Recomputation' sonrası temizlik adımıdır.
+    """
+    print("[INFO] Pruning old data from Speed Layer (tweet_metrics)...")
+    
+    # Batch'e giren en son window_end zamanını bul
+    max_window_end = metrics_df.select(F.max("window_end")).collect()[0][0]
+    
+    if max_window_end:
+        print(f"[INFO] Pruning real-time metrics older than or equal to: {max_window_end}")
+        
+        # JDBC ile değil, direkt psycopg2 ile DELETE sorgusu çalıştırıyoruz
+        try:
+            # os.environ.get logic'ini kullanarak DB adını al
+            dbname = os.environ.get("ANALYTICS_DB", "twitter_metrics")
+            user = os.environ.get("POSTGRES_USER", "admin")
+            pw = os.environ.get("POSTGRES_PASSWORD", "admin")
+            
+            conn = psycopg2.connect(
+                host="postgres",
+                database=dbname,
+                user=user,
+                password=pw
+            )
+            cur = conn.cursor()
+            
+            # Batch'in kapsadığı verileri speed layer tablosundan sil
+            cur.execute("DELETE FROM tweet_metrics WHERE window_end <= %s", (max_window_end,))
+            deleted_rows = cur.rowcount
+            
+            conn.commit()
+            cur.close()
+            conn.close()
+            print(f"[INFO] Successfully pruned {deleted_rows} rows from tweet_metrics.")
+        except Exception as e:
+            print(f"[ERROR] Speed layer pruning failed: {e}")
+    else:
+        print("[WARN] No window_end found, skipping pruning.")
 
 
 def write_to_parquet(metrics_df):
@@ -218,6 +262,9 @@ def main():
 
         # 5. Sonuçları Parquet'e yaz (Data Lake / Arşiv)
         write_to_parquet(metrics_df)
+
+        # 6. Speed Layer (tweet_metrics) temizliği yap (Lambda Loop Completion)
+        prune_speed_layer(spark, metrics_df)
 
         print("=" * 60)
         print("  BATCH JOB COMPLETED!")
