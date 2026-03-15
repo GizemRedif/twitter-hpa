@@ -11,13 +11,13 @@ import time
 import os
 from datetime import datetime, timezone
 
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-from confluent_kafka import Consumer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroDeserializer
-from confluent_kafka.serialization import SerializationContext, MessageField
+import pandas as pd # type: ignore
+import pyarrow as pa # type: ignore
+import pyarrow.parquet as pq # type: ignore
+from confluent_kafka import Consumer # type: ignore
+from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
+from confluent_kafka.schema_registry.avro import AvroDeserializer # type: ignore
+from confluent_kafka.serialization import SerializationContext, MessageField # type: ignore
 
 
 # -------- Ayarlar --------
@@ -100,9 +100,9 @@ def flush_to_parquet(buffer: list):
     table = pa.Table.from_pandas(df)
 
     # Convert all large_string columns to regular string (utf8) to ensure Spark compatibility
-    for i, field in enumerate(table.schema):
+    for i, field in enumerate(table.schema): # type: ignore
         if pa.types.is_large_string(field.type):
-            table = table.set_column(i, field.name, table[i].cast(pa.string()))
+            table = table.set_column(i, field.name, table[i].cast(pa.string())) # type: ignore
     
     # Write to a temporary file first, then rename.
     tmp_file_path = file_path + ".tmp"

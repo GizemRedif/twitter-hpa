@@ -9,6 +9,7 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 | ☁️ **Cloud Deployment** Planlanıyor
 
 > **Not:** Bu projede temel hedef, elimdeki veri setine göre optimizasyon yapmak değil; gerçek dünya standartlarında bir sistem mimarisi kurmayı öğrenmektir. Bu nedenle şu anda projemde fazla tahsis edilmiş (over-provisioned) kaynaklar bulunmaktadır (Partition sayıları, Flink parallelism ayarı gibi). Lambda architecture tamamlandığında bir bulut ortamına (büyük ihtimalle DigitalOcean) taşıma planlanmaktadır.
+> **Not:** İnterpreterden kaynaklı hata olarak gösterilen, ama aslında kodun çalışmasında hiçbir şekilde sıkıntı oluşturmayan hatalar `# type: ignore` yorum satırı ile gizlenmiştir. Proje içinde `# type: ignore` yorum satırları bu nedenle vardır.
 ---
 
 ### Teknoloji Yığını

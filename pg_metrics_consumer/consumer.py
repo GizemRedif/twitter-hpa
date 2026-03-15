@@ -7,11 +7,11 @@ Her 1 dakikalık pencere için airline bazlı metrik kayıtlarını tweet_metric
 import time
 from datetime import datetime, timezone
 
-from confluent_kafka import Consumer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroDeserializer
-from confluent_kafka.serialization import SerializationContext, MessageField
-import psycopg2
+from confluent_kafka import Consumer # type: ignore
+from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
+from confluent_kafka.schema_registry.avro import AvroDeserializer # type: ignore
+from confluent_kafka.serialization import SerializationContext, MessageField # type: ignore
+import psycopg2 # type: ignore
 import os
 
 
@@ -24,7 +24,7 @@ SCHEMA_REGISTRY_URL = "http://schema-registry:8081"
 
 PG_HOST = "postgres"
 PG_PORT = 5432
-PG_DB = os.environ.get("POSTGRES_DB", "twitter_metrics")
+PG_DB = os.environ.get("ANALYTICS_DB", "twitter_metrics")
 PG_USER = os.environ.get("POSTGRES_USER", "admin")
 PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
 
@@ -145,7 +145,7 @@ def main():
                 )
             except Exception as e:
                 print(f"[WARN] Deserialization failed: {e}")
-                skipped_count += 1
+                skipped_count += 1 # type: ignore
                 continue
 
             if metric is None:
@@ -169,7 +169,7 @@ def main():
                     metric["window_end"],
                     datetime.now(timezone.utc),
                 ))
-                saved_count += 1
+                saved_count += 1 # type: ignore
 
                 if saved_count % 50 == 0:
                     print(f"[INFO] {saved_count} metrics saved, {skipped_count} skipped")

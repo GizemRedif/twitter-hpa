@@ -10,8 +10,8 @@
 
 
 from datetime import datetime, timedelta
-from airflow import DAG
-from airflow.operators.bash import BashOperator  
+from airflow import DAG  # type: ignore
+from airflow.operators.bash import BashOperator  # type: ignore
 
 # DAG varsayılan ayarları
 default_args = {
@@ -27,7 +27,7 @@ default_args = {
 with DAG(
     dag_id="spark_batch_metrics",
     default_args=default_args,
-    description="PySpark batch job: MongoDB → Calculate Metrics → PostgreSQL + Parquet",
+    description="PySpark batch job: Parquet (Data Lake) → Calculate Metrics → PostgreSQL + Parquet",
     schedule_interval="@hourly",      #Her saat başı çalışır
     start_date=datetime(2025, 1, 1),  #DAG'ın başlangıç tarihi
     catchup=False,                    #Geçmiş görevleri çalıştırmaz (önemli çünkü eğer True olsaydı, start_date'ten bugüne kadar olan her saat için ayrı ayrı job tetiklerdi (binlerce çalışma))
@@ -35,11 +35,13 @@ with DAG(
 ) as dag:
 
     # Spark batch job'ını çalıştır
-    # BashOperator: Shell komutlarını Airflow task'ı olarak çalıştırır. Burada docker exec komutu çalıştırmak için kullanılıyor.
+    # BashOperator: Shell komutlarını Airflow task'ı olarak çalıştırır.
+    # spark-submit container'ı sürekli ayakta tutulur (tail -f /dev/null),
+    # böylece docker exec ile içeride spark-submit çalıştırabiliriz.
     run_spark_batch = BashOperator(
         task_id="run_spark_batch_job",
         bash_command=(
-            "docker exec spark-submit "                 # Zaten çalışan spark-submit container'ına bağlanır
+            "docker exec spark-submit "                 # Sürekli ayakta kalan spark-submit container'ına bağlanır
             "/opt/spark/bin/spark-submit "              # Spark'ın submit komutunu çalıştırır
             "--master spark://spark-master:7077 "       # Job'u Spark master'a gönderir
             "--deploy-mode client "                     # Driver, submit eden makinede çalışır (cluster modu değil)

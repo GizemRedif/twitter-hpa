@@ -9,6 +9,10 @@ __pycache__/
 data/
 batch_output/
 *.csv
+*.parquet
+_SUCCESS
+# Local bilgisayarımdaki data lake kalıntılarını otomatik temizlemek için.
+clean_data.py  
 
 # Airflow
 airflow/logs/
@@ -31,3 +35,9 @@ dependency-reduced-pom.xml
 .settings/
 *.log
 .DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+Project roadmap.md

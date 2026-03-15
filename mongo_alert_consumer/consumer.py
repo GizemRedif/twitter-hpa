@@ -7,12 +7,12 @@ Negatif sentiment'li tweet'leri tweet_alerts koleksiyonuna kaydeder.
 import time
 from datetime import datetime, timezone
 
-from confluent_kafka import Consumer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroDeserializer
-from confluent_kafka.serialization import SerializationContext, MessageField
-from pymongo import MongoClient
-from pymongo.errors import DuplicateKeyError
+from confluent_kafka import Consumer # type: ignore
+from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
+from confluent_kafka.schema_registry.avro import AvroDeserializer # type: ignore
+from confluent_kafka.serialization import SerializationContext, MessageField # type: ignore
+from pymongo import MongoClient # type: ignore
+from pymongo.errors import DuplicateKeyError # type: ignore
 
 
 # -------- Ayarlar ------------
@@ -107,11 +107,11 @@ def main():
                 )
             except Exception as e:
                 print(f"[WARN] Deserialization failed: {e}")
-                skipped_count += 1
+                skipped_count += 1 # type: ignore
                 continue
 
             if tweet is None:
-                skipped_count += 1
+                skipped_count += 1 # type: ignore
                 continue
 
             # MongoDB document'ı hazırla
@@ -132,7 +132,7 @@ def main():
                     {"$set": doc},
                     upsert=True,
                 )
-                saved_count += 1
+                saved_count += 1 # type: ignore
 
                 if saved_count % 50 == 0:
                     print(f"[INFO] {saved_count} alerts saved, {skipped_count} skipped")

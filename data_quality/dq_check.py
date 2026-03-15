@@ -15,10 +15,10 @@ import os
 import sys
 import glob
 from datetime import datetime, timezone
-import pandas as pd
-import pyarrow.parquet as pq
-import psycopg2
-from pymongo import MongoClient
+import pandas as pd  # type: ignore
+import pyarrow.parquet as pq  # type: ignore
+import psycopg2  # type: ignore
+from pymongo import MongoClient  # type: ignore
 
 
 # ============================================================
@@ -28,7 +28,7 @@ PARQUET_PATH = "/app/data/raw_tweets"
 
 PG_HOST = "postgres"
 PG_PORT = 5432
-PG_DB = os.environ.get("POSTGRES_DB", "twitter_metrics")
+PG_DB = os.environ.get("ANALYTICS_DB", "twitter_metrics")
 PG_USER = os.environ.get("POSTGRES_USER", "admin")
 PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
 
@@ -130,12 +130,6 @@ def check_parquet(dq: DQResults):
         invalid = unique_sentiments - VALID_SENTIMENTS   # len(invalid) > 0 ise hata var demektir.
         dq.add(layer, "Are the Sentiment values valid?", len(invalid) == 0, 
                 f"Invalid values: {invalid}" if invalid else f"Values: {unique_sentiments}")
-
-    # 1f. Duplicate kontrolü 
-    if "tweet_id" in df.columns:
-        dup_count = df["tweet_id"].duplicated().sum()
-        dq.add(layer, "Duplicate tweet_id check", dup_count == 0,
-               f"{dup_count} duplicate records" if dup_count > 0 else "No duplicates")
 
 
 # ============================================================

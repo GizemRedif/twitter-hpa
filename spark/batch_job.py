@@ -9,9 +9,9 @@ Kullanım:
     spark-submit --packages org.postgresql:postgresql:42.7.4 batch_job.py
 """
 
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType
+from pyspark.sql import SparkSession # type: ignore
+from pyspark.sql import functions as F # type: ignore
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType # type: ignore
 import shutil, os
 
 
@@ -19,7 +19,7 @@ import shutil, os
 # Ham tweet verilerinin Parquet formatında saklandığı dizin (Data Lake)
 RAW_PARQUET_PATH = "/opt/spark-data/raw_tweets"
 
-PG_URL = "jdbc:postgresql://postgres:5432/" + os.environ.get("POSTGRES_DB", "twitter_metrics")
+PG_URL = "jdbc:postgresql://postgres:5432/" + os.environ.get("ANALYTICS_DB", "twitter_metrics")
 PG_TABLE = "batch_tweet_metrics"
 PG_USER = os.environ.get("POSTGRES_USER", "admin")
 PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
@@ -93,7 +93,7 @@ def transform_and_compute_metrics(df):
     print("[INFO] Starting metric calculation...")
 
     # tweet_created string'ini timestamp'a çevirir (Format: "2015-02-24 11:35:52 -0800")
-    df_parsed = df.withColumn("tweet_ts", F.to_timestamp(F.col("tweet_created"), "yyyy-MM-dd HH:mm:ss Z"))
+    df_parsed = df.withColumn("tweet_ts", F.to_timestamp(F.substring(F.col("tweet_created"), 1, 19), "yyyy-MM-dd HH:mm:ss"))
 
     # Geçersiz tarihleri filtrele
     df_parsed = df_parsed.filter(F.col("tweet_ts").isNotNull())

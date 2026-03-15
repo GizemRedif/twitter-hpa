@@ -1,9 +1,9 @@
 import csv
 import time
 import random
-from confluent_kafka import SerializingProducer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.avro import AvroSerializer
+from confluent_kafka import SerializingProducer # type: ignore
+from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
+from confluent_kafka.schema_registry.avro import AvroSerializer # type: ignore
 
 # AVRO şeması: Kafka'ya gönderilecek tweet verisinin yapısını tanımlar.
 TWEET_SCHEMA = """{
@@ -74,8 +74,8 @@ for row in all_data:
     count += 1
     if count % 500 == 0:
         print(f"{count} tweets sent...")
-    # Gönderimler arasında işlem yoğunluğuna göre çok kısa bekleme süresi.
-    time.sleep(0.01)
+    # Gönderimler arasında rastgele gecikme (gerçek zamanlı akışı simüle eder).
+    time.sleep(random.uniform(0.005, 0.02))
 
 # Gönderilen tüm mesajların Kafka'ya ulaştığından emin olmak için kullanılır.
 producer.flush()
