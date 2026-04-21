@@ -13,7 +13,7 @@ Tüm kontroller geçerse exit code 0, herhangi biri başarısız olursa exit cod
 
 import os
 import sys
-import glob
+import s3fs # type: ignore
 from datetime import datetime, timezone
 import pandas as pd  # type: ignore
 import pyarrow.parquet as pq  # type: ignore
@@ -23,8 +23,12 @@ from pymongo import MongoClient  # type: ignore
 
 # ============================================================
 # Ayarlar
-# ============================================================
-PARQUET_PATH = "/app/data/raw_tweets"
+PARQUET_S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "your_bucket_name")
+PARQUET_S3_ENDPOINT = os.environ.get("S3_ENDPOINT_URL", "https://nyc3.digitaloceanspaces.com")
+AWS_KEY = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+PARQUET_PATH = f"s3://{PARQUET_S3_BUCKET}/raw_tweets"
 
 PG_HOST = "postgres"
 PG_PORT = 5432
@@ -82,8 +86,19 @@ def check_parquet(dq: DQResults):
 
     # Hatırlatma - add(layer, check, passed, detail)
 
-    # 1a. Dosya varlığı kontrolü
-    parquet_files = glob.glob(os.path.join(PARQUET_PATH, "*.parquet"))
+    # 1a. Dosya varlığı kontrolü (S3 üzerinden)
+    fs = s3fs.S3FileSystem(
+        key=AWS_KEY,
+        secret=AWS_SECRET,
+        client_kwargs={'endpoint_url': PARQUET_S3_ENDPOINT, 'region_name': AWS_REGION}
+    )
+    
+    try:
+        parquet_files = fs.glob(f"{PARQUET_PATH}/*.parquet")
+    except Exception as e:
+        dq.add(layer, "S3 Connection & Parquet file existence", False, str(e))
+        return
+
     has_files = len(parquet_files) > 0
     dq.add(layer, "Parquet file existence", has_files, f"{len(parquet_files)} files found" if has_files else "No .parquet files found!")
 
@@ -95,11 +110,17 @@ def check_parquet(dq: DQResults):
     # Parquet dosyası mevcutsa devam edilir
 
     # Tüm parquet dosyalarını oku
-    # Klasörde bulunan tüm Parquet dosyalarını tek bir DataFrame'de birleştirmeye çalışıyor. Hata olursa da programı çökertmekten kurtarıyor.
+    # S3'teki dosyaları DataFrame'e çeviriyoruz.
     try:
-        df = pd.concat([pq.read_table(f).to_pandas() for f in parquet_files], ignore_index=True) 
+        # Prepend 's3://' to the paths returned by fs.glob since read_parquet needs the protocol
+        s3_files = [f"s3://{f}" for f in parquet_files]
+        df = pd.concat([pd.read_parquet(f, storage_options={
+            "key": AWS_KEY,
+            "secret": AWS_SECRET,
+            "client_kwargs": {'endpoint_url': PARQUET_S3_ENDPOINT, 'region_name': AWS_REGION}
+        }) for f in s3_files], ignore_index=True) 
     except Exception as e:
-        dq.add(layer, "Parquet reading", False, str(e))
+        dq.add(layer, "Parquet reading from S3", False, str(e))
         return
 
     # 1b. Kayıt sayısı

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import pandas as pd # type: ignore
 import pyarrow as pa # type: ignore
 import pyarrow.parquet as pq # type: ignore
+import s3fs # type: ignore
 from confluent_kafka import Consumer # type: ignore
 from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
 from confluent_kafka.schema_registry.avro import AvroDeserializer # type: ignore
@@ -27,8 +28,15 @@ KAFKA_GROUP_ID = "parquet-raw-consumer-group"
 
 SCHEMA_REGISTRY_URL = "http://schema-registry:8081"
 
-# Parquet dosyalarının yazılacağı dizin (Docker volume ile host'a bağlanır)
-PARQUET_OUTPUT_DIR = "/app/data/raw_tweets"
+# S3 Configuration from Environment Variables
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "your_bucket_name")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "https://nyc3.digitaloceanspaces.com")
+AWS_KEY = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+# Parquet dosyalarının yazılacağı S3 dizini
+PARQUET_OUTPUT_DIR = f"s3://{S3_BUCKET_NAME}/raw_tweets"
 
 # Flush ayarları: Kaç mesaj birikince veya kaç saniye geçince Parquet dosyası yazılsın?
 FLUSH_BATCH_SIZE = 500       # 500 mesaj birikince flush et
@@ -79,18 +87,13 @@ def create_consumer(max_retries: int = 30, retry_interval: int = 5):
     raise RuntimeError("Could not connect after maximum retries")
 
 
-# -------- Parquet'e yazma fonksiyonu --------
 def flush_to_parquet(buffer: list):
     """
     Bellekteki tweet listesini bir Parquet dosyasına yazar.
     Dosya adı: raw_tweets_<timestamp>.parquet şeklinde benzersiz (unique) olur.
-    Bu sayede her flush işlemi yeni bir dosya oluşturur (append-only / immutable).
     """
     if not buffer:
         return
-
-    # Çıktı dizinini oluştur (yoksa)
-    os.makedirs(PARQUET_OUTPUT_DIR, exist_ok=True)
 
     # Benzersiz dosya adı oluştur (timestamp bazlı)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
@@ -104,10 +107,16 @@ def flush_to_parquet(buffer: list):
         if pa.types.is_large_string(field.type):
             table = table.set_column(i, field.name, table[i].cast(pa.string())) # type: ignore
     
-    # Write to a temporary file first, then rename.
-    tmp_file_path = file_path + ".tmp"
-    pq.write_table(table, tmp_file_path, compression="snappy")
-    os.rename(tmp_file_path, file_path)
+    # Write to a temporary file first, then rename (Upload to S3 directly via S3FileSystem)
+    fs = s3fs.S3FileSystem(
+        key=AWS_KEY,
+        secret=AWS_SECRET,
+        client_kwargs={'endpoint_url': S3_ENDPOINT_URL, 'region_name': AWS_REGION}
+    )
+    
+    # Check if bucket exists, if not this script will just attempt to write.
+    # Write Parquet to S3 directly:
+    pq.write_table(table, file_path, filesystem=fs, compression="snappy")
 
     print(f"[INFO] Flushed {len(buffer)} tweets to {file_path}")
 

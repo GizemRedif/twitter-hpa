@@ -189,7 +189,35 @@ Data lake duplice kontrolü kaldırıldı.
 
 ---
 
-## DigitalOcean'a geçiş yapılacak...
+### 10. Cloud Migration — DigitalOcean Spaces (S3) Integration
+Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyumlu (cloud-native) **DigitalOcean Spaces (S3 API)** altyapısına taşındı (Henüz droplet yok, sadece spaces):
+
+#### Data Lake — S3 Geçişi
+- **Ham Veriler (Raw tweets):** `parquet_raw_consumer` güncellendi; artık verileri lokal disk yerine doğrudan `s3://twitter-hpa-datalake/raw_tweets/` adresine yazıyor. (`s3fs` kütüphanesi entegre edildi).
+- **İşlenmiş Veriler (Batch output):** Spark batch job çıktısı lokal diskten çıkarılarak `s3://twitter-hpa-datalake/batch_output/` adresine taşındı.
+
+#### Spark Bulut Entegrasyonu
+- Spark Submit/Master/Worker imajlarına S3 ile haberleşebilmesi için gerekli JAR paketleri (`hadoop-aws`, `aws-java-sdk-bundle`) eklendi.
+- `batch_job.py` içerisinde S3A protokolü yapılandırması tamamlandı; erişim anahtarları (Access Key/Secret Key) güvenli bir şekilde `.env` üzerinden enjekte edildi.
+
+#### PostgreSQL "Dependent View" Çözümü
+- **Sorun:** Spark'ın default `overwrite` modu tabloyu silmeye (DROP) çalıştığı için, bu tabloya bağlı olan `unified_metrics` view'u nedeniyle hata alınıyordu.
+- **Çözüm:** Spark yazma işlemi öncesinde `psycopg2` ile manuel **TRUNCATE CASCADE** komutu çalıştıran bir mantık eklendi. Spark yazma modu `append` olarak değiştirilerek veritabanı görünümlerinin bozulması engellendi.
+
+#### Data Quality Cloud Update
+- `dq_check.py` güncellendi; artık dosya varlığı, şema kontrolü ve veri analizlerini S3 üzerindeki veriler üzerinden gerçekleştiriyor.
+
+#### Altyapı Temizliği
+- `docker-compose.yml` içerisindeki Data Lake ve Batch Output klasörlerine ait yerel `volumes` tanımları kaldırılarak sunucu "stateless" (durumsuz) hale getirildi.
+
+---
+
+### 11. Database & Performance Optimization (Planlanıyor...)
+- [ ] **MongoDB Indexing:** Alert aramaları için airline ve sentiment bazlı kompleks indekslerin oluşturulması.
+- [ ] **PostgreSQL Partitioning:** Büyüyen batch verilerinin tarih bazlı parçalanması (Partitioning).
+
+---
+
 
 
 

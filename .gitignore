@@ -6,13 +6,9 @@ __pycache__/
 .env
 
 # Data & Output (Ignored to avoid pushing large metrics/parquet data)
-data/
-batch_output/
-*.csv
+*.csv 
 *.parquet
-_SUCCESS
-# Local bilgisayarımdaki data lake kalıntılarını otomatik temizlemek için.
-clean_data.py  
+_SUCCESS 
 
 # Airflow
 airflow/logs/
@@ -41,3 +37,5 @@ Thumbs.db
 docker-compose.override.yml
 
 # Project roadmap.md
+notes.txt 
+for_me/

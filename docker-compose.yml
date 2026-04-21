@@ -144,8 +144,8 @@ services:
     depends_on:
       schema-registry:
         condition: service_healthy
-    volumes:
-      - ./data/raw_tweets:/app/data/raw_tweets
+    env_file:
+      - .env
     environment:
       PYTHONUNBUFFERED: "1"
     restart: on-failure
@@ -240,9 +240,6 @@ services:
   spark-submit:
     build: ./spark
     container_name: spark-submit
-    volumes:
-      - ./data/raw_tweets:/opt/spark-data/raw_tweets
-      - ./data/batch_output:/opt/spark-data/batch_output
     env_file:
       - .env
     # Entrypoint override: İlk batch job'u çalıştırır, sonra container ayakta kalır.
@@ -254,6 +251,7 @@ services:
         sleep 30
         echo "Submitting initial PySpark Batch Job..."
         /opt/spark/bin/spark-submit \
+          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
           --master spark://spark-master:7077 \
           --deploy-mode client \
           /opt/spark-jobs/batch_job.py
@@ -276,9 +274,6 @@ services:
     container_name: spark-master
     ports:
       - "8084:8080"
-    volumes:
-      - ./data/raw_tweets:/opt/spark-data/raw_tweets
-      - ./data/batch_output:/opt/spark-data/batch_output
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
 
   # ============================================================
@@ -292,9 +287,6 @@ services:
     environment:
       SPARK_WORKER_CORES: 1
       SPARK_WORKER_MEMORY: 1G
-    volumes:
-      - ./data/raw_tweets:/opt/spark-data/raw_tweets
-      - ./data/batch_output:/opt/spark-data/batch_output
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
@@ -313,8 +305,6 @@ services:
   data-quality-check:
     build: ./data_quality
     container_name: data-quality-check
-    volumes:
-      - ./data/raw_tweets:/app/data/raw_tweets # senin bilgisayarındaki data/raw_tweets/ klasörü, container'ın içinden /app/data/raw_tweets/ olarak erişilebilir oluyor. İki yönlü bağlantı — biri değişirse diğeri de değişir.
     env_file:
       - .env
     environment:

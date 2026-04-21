@@ -17,21 +17,29 @@ import psycopg2 # type: ignore
 
 
 # -------- Ayarlar --------
-# Ham tweet verilerinin Parquet formatında saklandığı dizin (Data Lake)
-RAW_PARQUET_PATH = "/opt/spark-data/raw_tweets"
+# S3 / DO Spaces ayarları
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "your_bucket_name")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "https://nyc3.digitaloceanspaces.com")
+AWS_KEY = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY")
+
+# Ham tweet verilerinin Parquet formatında saklandığı S3 dizini (Data Lake)
+# Spark s3a:// protokolünü kullanır.
+RAW_PARQUET_PATH = f"s3a://{S3_BUCKET_NAME}/raw_tweets"
 
 PG_URL = "jdbc:postgresql://postgres:5432/" + os.environ.get("ANALYTICS_DB", "twitter_metrics")
 PG_TABLE = "batch_tweet_metrics"
 PG_USER = os.environ.get("POSTGRES_USER", "admin")
 PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "admin")
 
-PARQUET_OUTPUT_PATH = "/opt/spark-data/batch_output"
+# Batch metriklerinin Parquet formatında saklanacağı S3 dizini
+PARQUET_OUTPUT_PATH = f"s3a://{S3_BUCKET_NAME}/batch_output"
 
 
 # Spark uygulamasını başlatır. 
 def create_spark_session():
-    """MongoDB ve PostgreSQL bağlantıları için yapılandırılmış SparkSession oluşturur."""
-    return (
+    """MongoDB, PostgreSQL ve S3 (DO Spaces) bağlantıları için yapılandırılmış SparkSession oluşturur."""
+    spark = (
         SparkSession.builder
         .appName("Twitter HPA - Batch Layer")
         .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
@@ -40,6 +48,17 @@ def create_spark_session():
         .config("spark.sql.parquet.cacheMetadata", "false")
         .getOrCreate()   # Zaten bir session varsa onu kullanır, yoksa yenisini oluşturur.
     )
+    
+    # S3 Hadoop Ayarları
+    sc = spark.sparkContext
+    sc._jsc.hadoopConfiguration().set("fs.s3a.access.key", AWS_KEY)
+    sc._jsc.hadoopConfiguration().set("fs.s3a.secret.key", AWS_SECRET)
+    sc._jsc.hadoopConfiguration().set("fs.s3a.endpoint", S3_ENDPOINT_URL)
+    sc._jsc.hadoopConfiguration().set("fs.s3a.path.style.access", "true") # Gerekli (özellikle DO Spaces/Minio için)
+    sc._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    sc._jsc.hadoopConfiguration().set("fs.s3a.connection.ssl.enabled", "true")
+    
+    return spark
 
 
 def get_raw_tweet_schema():
@@ -138,10 +157,29 @@ def transform_and_compute_metrics(df):
 
 def write_to_postgresql(metrics_df):
     """Batch metriklerini PostgreSQL batch_tweet_metrics tablosuna JDBC ile yazar."""
-    print("[INFO] Writing to PostgreSQL...")
+    print("[INFO] Truncating table with psycopg2...")
+    
+    # JDBC'nin tabloyu silmeye (DROP) çalışıp View'ları bozmasını engellemek için 
+    # tabloyu manuel olarak truncate ediyoruz.
+    try:
+        conn_params = {
+            "host": "postgres",
+            "port": 5432,
+            "database": os.environ.get("ANALYTICS_DB", "twitter_metrics"),
+            "user": PG_USER,
+            "password": PG_PASSWORD
+        }
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"TRUNCATE TABLE {PG_TABLE} CASCADE;")
+                print(f"[INFO] Table {PG_TABLE} truncated successfully.")
+    except Exception as e:
+        print(f"[WARNING] Truncate failed: {e}. Attempting to proceed with Spark write.")
 
-    # Hesaplanan metrikleri JDBC ile PostgreSQL'deki batch_tweet_metrics tablosuna yazar. 
-    # JDBC (Java Database Connectivity): Java uygulamalarının veritabanlarına bağlanmasını sağlayan standart API’dir.
+    print("[INFO] Writing to PostgreSQL via Spark (append mode)...")
+
+    # Mode 'append' kullanıyoruz çünkü tabloyu az önce manuel boşalttık.
+    # Bu sayede Spark tabloyu silmeye (drop) çalışmayacak ve View'larımız sağlam kalacak.
     (
         metrics_df.write.format("jdbc")
         .option("url", PG_URL)
@@ -149,7 +187,7 @@ def write_to_postgresql(metrics_df):
         .option("user", PG_USER)
         .option("password", PG_PASSWORD)
         .option("driver", "org.postgresql.Driver")
-        .mode("overwrite")       # Her çalışmada tabloyu yeniden yaz (eski veriyi siler)
+        .mode("append") 
         .save()
     )
 
@@ -200,43 +238,18 @@ def prune_speed_layer(spark, metrics_df):
 
 
 def write_to_parquet(metrics_df):
-    """Batch metriklerini Parquet formatında airline bazlı partition'layarak yazar."""
-    # Parquet: Sütun bazlı (columnar) bir dosya formatıdır. CSV'ye kıyasla:
-    # - Çok daha hızlı okuma (sadece ihtiyaç duyulan sütunlar okunur)
-    # - Çok daha küçük dosya boyutu (Snappy sıkıştırma ile)
-    # - Büyük veri araçları (Spark, Hive, Presto) ile doğrudan uyumlu
-    print(f"[INFO] Writing to Parquet: {PARQUET_OUTPUT_PATH}")
+    """Batch metriklerini Parquet formatında airline bazlı partition'layarak S3'e yazar."""
+    print(f"[INFO] Writing to S3 Parquet: {PARQUET_OUTPUT_PATH}")
 
-    # --- Eski Parquet çıktılarını temizle ---
-    # write.mode("overwrite") yerine write.mode("append") kullanıp manuel temizleme yapıyoruz. Nedenleri:
-    # Spark'ın overwrite modu çıktı dizininin TAMAMINI silmeye çalışır.
-    # Ancak /opt/spark-data/batch_output dizini Docker volume mount noktası olduğu için silinemez ("Device or resource busy" hatası verir).
-    # Çözüm: Kök dizini olduğu gibi bırakıp sadece içindeki alt dosya/dizinleri temizle.
-    if os.path.exists(PARQUET_OUTPUT_PATH):
-        for item in os.listdir(PARQUET_OUTPUT_PATH):
-            item_path = os.path.join(PARQUET_OUTPUT_PATH, item)
-            if os.path.isdir(item_path):
-                shutil.rmtree(item_path)    # airline=American/ gibi partition dizinlerini sil
-            else:
-                os.remove(item_path)        # _SUCCESS gibi dosyaları sil
-
-    # --- Parquet olarak diske yaz ---
-    # mode("append"): Mevcut dizine ekleme yapar, dizini silmeye çalışmaz.
-    # (Yukarıda manuel temizleme yaptığımız için sonuç overwrite ile aynı. Sanki eski içeriğin üzerine yazılıyor gibi yani)
-    # partitionBy("airline"): Her airline değeri için ayrı alt dizin oluşturur:
-    #   batch_output/
-    #   ├── airline=American/part-00000.snappy.parquet
-    #   ├── airline=United/part-00000.snappy.parquet
-    #   ├── airline=Delta/part-00000.snappy.parquet
-    #   └── ...
-    # Bu yapı sayesinde "sadece Delta'nın verisini getir" gibi sorgularda Spark yalnızca airline=Delta/ dizinini okur ve işlem hızlı olur (partition pruning).
+    # S3 üzerinde olduğumuz için yerel dizinlerdeki "Device or resource busy" hatasıyla karşılaşmayız.
+    # Bu yüzden Spark'ın standart mode("overwrite") özelliğini güvenle kullanabiliriz.
     (
-        metrics_df.write.mode("append")
+        metrics_df.write
+        .mode("overwrite")
         .partitionBy("airline")
         .parquet(PARQUET_OUTPUT_PATH)
     )
-
-    print("[INFO] Completed Parquet write.") 
+    print(f"[INFO] Parquet write to S3 completed.")
 
 
 # Tüm adımları sırayla çalıştıran orkestratör
