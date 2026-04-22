@@ -186,10 +186,13 @@ Data lake duplice kontrolü kaldırıldı.
 - `Tweet.java` POJO başlangıçta kullanılıyordu; işlem karmaşıklığı artınca `GenericRecord` kullanımına geçildi ve `Tweet.java` silindi.
 - Spark başlangıçta MongoDB'den okuyacak şekilde planlandı; Parquet Data Lake'e geçilmesiyle Spark'ın kaynağı değiştirildi.
 - Tüm hassas bilgiler (şifreler vs.) `.env` dosyasına taşındı, `.env.example` hazırlandı, `.gitignore` güncellendi.
+- İnterpreterden kaynaklı hata olarak gösterilen, ama aslında kodun çalışmasında hiçbir şekilde sıkıntı oluşturmayan hatalar `# type: ignore` yorum satırı ile gizlenmiştir. Proje içinde `# type: ignore` yorum satırları bu nedenle vardır.
 
 ---
 
 ### 10. Cloud Migration — DigitalOcean Spaces (S3) Integration
+
+> commit: feat: Migrate Data Lake to DigitalOcean Spaces (S3) and make architecture stateless
 Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyumlu (cloud-native) **DigitalOcean Spaces (S3 API)** altyapısına taşındı (Henüz droplet yok, sadece spaces):
 
 #### Data Lake — S3 Geçişi
@@ -209,6 +212,33 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
 
 #### Altyapı Temizliği
 - `docker-compose.yml` içerisindeki Data Lake ve Batch Output klasörlerine ait yerel `volumes` tanımları kaldırılarak sunucu "stateless" (durumsuz) hale getirildi.
+
+> commit:  
+
+#### Flink Checkpoint → S3 Taşıması
+- **Sorun:** Flink checkpoint verileri konteyner içinde kalıyordu. Konteyner çöktüğünde veya yeniden başlatıldığında Flink'in durumu (state) sıfırlanıyor ve Kafka'dan tüm verileri baştan işlemek zorunda kalıyordu.
+- **Çözüm:** Flink'in resmi S3 plugin'i (`flink-s3-fs-hadoop`) Dockerfile'da plugin dizinine kopyalandı. `docker-compose.yml`'de hem JobManager hem TaskManager için S3 checkpoint/savepoint konfigürasyonu eklendi:
+  - `state.checkpoints.dir: s3://twitter-hpa-datalake/flink-checkpoints/`
+  - `state.savepoints.dir: s3://twitter-hpa-datalake/flink-savepoints/`
+  - DO Spaces endpoint ve credential'ları `env_file` + ortam değişkenleri ile aktarıldı.
+- **Sonuç:** Flink artık her 5 saniyede bir checkpoint'ini buluta yazar. Job çökse bile tam kaldığı Kafka offset'inden devam eder (exactly-once semantics).
+
+#### Airflow Remote Logging → S3 Taşıması
+- **Sorun:** Airflow task logları konteyner içinde kalıyordu. Konteyner yeniden başlatıldığında geçmiş DAG çalıştırmalarının logları kayboluyordu. Ayrıca Droplet'e taşındığında disk dolma riski oluşturuyordu çünkü çok fazla log üretiliyor.
+- **Çözüm:**
+  - Özel `airflow/Dockerfile` oluşturuldu: Resmi Airflow imajına `apache-airflow-providers-amazon` paketi eklendi.
+  - `docker-compose.yml`'de Airflow servisi `image` yerine `build: ./airflow` olarak güncellendi.
+  - S3 Remote Logging konfigürasyonu ortam değişkenleri ile yapılandırıldı. 
+- **Sonuç:** Tüm DAG çalıştırma logları (Spark batch, Data Quality) artık bulutta saklanıyor. Airflow Web UI'dan geçmiş loglar S3 üzerinden okunabiliyor.
+
+#### S3 Landing Zone (Raw Data Ingestion) Geçişi
+- **Sorun:** `kafka_producer` ham CSV dosyasını (`Tweets.csv`) lokal dizinden okuyordu. Bu durum, Droplet'e geçişte sunucunun "stateful" olmasına (dosyayı barındırmasına) ve ölçeklenebilirliğin kısıtlanmasına neden oluyordu.
+- **Çözüm:**
+  - DO Spaces'te `landing-zone/` dizini oluşturuldu.
+  - `kafka_producer/requirements.txt` dosyasına `s3fs` kütüphanesi eklendi.
+  - `kafka_producer/producer.py` güncellenerek lokal `with open()` yerine `s3fs` kullanılarak doğrudan S3 üzerinden okuma yapacak şekilde refactor edildi.
+  - `docker-compose.yml` içerisindeki `kafka-producer` servisine `.env` bağlantısı eklendi.
+- **Sonuç:** Droplet tamamen "Stateless" bir "Compute" birimine dönüştü. Veri sisteme dışarıdan S3 aracılığıyla giriyor ve işleniyor.
 
 ---
 

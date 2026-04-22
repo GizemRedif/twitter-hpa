@@ -96,6 +96,8 @@ services:
     depends_on:
       schema-registry:
         condition: service_healthy
+    env_file:
+      - .env
     # Python loglarının (print vb.) terminalde anlık olarak görünmesini sağlar.
     environment:
       PYTHONUNBUFFERED: "1"
@@ -110,7 +112,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: airflow    # Airflow metadata DB — analytics DB (twitter_metrics) init SQL ile ayrıca oluşturulur
+      POSTGRES_DB: airflow # Airflow metadata DB — analytics DB (twitter_metrics) init SQL ile ayrıca oluşturulur
     ports:
       - "5432:5432"
     volumes:
@@ -170,15 +172,32 @@ services:
   # Sonra o imajlardan konteynerleri yaratır.
   # En son depends_on kısmına bakarak, önce Schema Registry'nin "sağlıklı" (healthy) olmasını bekler, sonra senin consumer'larını çalıştırır.
 
+  # Airflow: Remote Logging ile loglar DO Spaces'e (S3) yazılır.
+  # Özel Dockerfile ile apache-airflow-providers-amazon paketi eklendi.
   airflow:
-    image: apache/airflow:2.7.1
+    build: ./airflow
     container_name: airflow
     depends_on:
       - postgres
+    env_file:
+      - .env
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # ---- S3 Remote Logging Konfigürasyonu ----
+      # Airflow loglarını lokal disk yerine DO Spaces'e (S3) yazar.
+      # Böylece konteyner çökse veya yeniden başlatılsa bile loglar kaybolmaz.
+      AIRFLOW__LOGGING__REMOTE_LOGGING: "True"
+      AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "s3://${S3_BUCKET_NAME}/airflow-logs"
+      AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID: "aws_default"
+      # AWS connection bilgileri (DO Spaces S3 API uyumlu)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_REGION}
+      # Airflow'un AWS bağlantısını ortam değişkeninden okuması için
+      # Connection URI formatı: aws://<access_key>:<secret_key>@?endpoint_url=<endpoint>
+      AIRFLOW_CONN_AWS_DEFAULT: "aws://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@?endpoint_url=${S3_ENDPOINT_URL}"
     ports:
       - "8081:8080"
     volumes:
@@ -195,14 +214,27 @@ services:
   # Dockerfile ile Maven build yapılır → fat JAR otomatik eklenir.
   # docker-entrypoint-override.sh ile job otomatik submit edilir.
   # Böylece "docker compose up --build" tek komutla her şey başlar.
+  # FLINK_PROPERTIES ile S3 checkpoint/savepoint ayarları eklendi.
   flink-jobmanager:
     build: ./flink-tweets-stream
     container_name: flink-jobmanager
     ports:
       - "8082:8081"
+    env_file:
+      - .env
     environment:
+      # AWS/DO Spaces credential'ları Flink'e ortam değişkeni olarak aktarılır
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
+        state.backend: hashmap
+        state.checkpoints.dir: s3://${S3_BUCKET_NAME}/flink-checkpoints/
+        state.savepoints.dir: s3://${S3_BUCKET_NAME}/flink-savepoints/
+        s3.endpoint: ${S3_ENDPOINT_URL}
+        s3.path.style.access: true
+        s3.entropy.key: _entropy_
+        s3.entropy.length: 4
     # Özel entrypoint: JobManager başlat → REST API bekle → job submit et
     entrypoint: [ "/bin/bash", "/opt/flink/usrlib/docker-entrypoint-override.sh" ]
     depends_on:
@@ -217,13 +249,25 @@ services:
   # Gerçek veri işleme bu node'da yapılır.
   # JobManager ile aynı image'ı kullanır (JAR + bağımlılık tutarlılığı için).
   # Task slot sayısı: 2 → bu worker aynı anda 2 paralel görev çalıştırabilir. (Task)
+  # FLINK_PROPERTIES ile S3 checkpoint/savepoint ayarları eklendi.
   flink-taskmanager:
     build: ./flink-tweets-stream
     container_name: flink-taskmanager
+    env_file:
+      - .env
     environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2    
+        taskmanager.numberOfTaskSlots: 2
+        state.backend: hashmap
+        state.checkpoints.dir: s3://${S3_BUCKET_NAME}/flink-checkpoints/
+        state.savepoints.dir: s3://${S3_BUCKET_NAME}/flink-savepoints/
+        s3.endpoint: ${S3_ENDPOINT_URL}
+        s3.path.style.access: true
+        s3.entropy.key: _entropy_
+        s3.entropy.length: 4
     command: taskmanager
     depends_on:
       - flink-jobmanager

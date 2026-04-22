@@ -1,6 +1,8 @@
 import csv
 import time
 import random
+import os
+import s3fs # type: ignore
 from confluent_kafka import SerializingProducer # type: ignore
 from confluent_kafka.schema_registry import SchemaRegistryClient # type: ignore
 from confluent_kafka.schema_registry.avro import AvroSerializer # type: ignore
@@ -39,14 +41,23 @@ def delivery_report(err, msg):
     if err is not None:
         print(f"Message delivery failed: {err}")
 
-# CSV dosyasını okur, tarih sırasına dizer ve her satırı AVRO formatında Kafka'ya gönderir.
+# CSV dosyasını DO Spaces (S3) Landing Zone'dan okur, tarih sırasına dizer ve her satırı AVRO formatında Kafka'ya gönderir.
 # Tarih sırasına dizme nedenimiz: Flink'in event time özelliği ile verileri doğru zaman sırasına göre işlemesini sağlamak. (bu nedenle önce all_data ile liste yapıyoruz)
 # Aksi takdirde, veriler rastgele bir sırayla gelebilir ve Flink'in windowing işlemleri yanlış sonuçlar üretebilir.
+# S3 bağlantı ayarları
+s3 = s3fs.S3FileSystem(
+    key=os.environ.get("AWS_ACCESS_KEY_ID"),
+    secret=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    client_kwargs={'endpoint_url': os.environ.get("S3_ENDPOINT_URL")}
+)
+bucket_name = os.environ.get("S3_BUCKET_NAME", "twitter-hpa-datalake")
+s3_file_path = f"s3://{bucket_name}/landing-zone/Tweets.csv"
+
 count = 0
 all_data = []
 
-print("Reading CSV file...")
-with open("Tweets.csv", encoding="utf-8", errors="replace") as f:
+print(f"Reading CSV file from S3: {s3_file_path}...")
+with s3.open(s3_file_path, 'r', encoding="utf-8", errors="replace") as f:
     reader = csv.DictReader(f)
     for row in reader:
         all_data.append(row)

@@ -40,9 +40,13 @@ RUN mvn clean package -DskipTests -B
 # Resmi Flink 1.18 imajını kullanıyoruz (docker-compose.yml ile aynı versiyon)
 FROM flink:1.18
 
-# Build aşamasında üretilen fat JAR'ı Flink'in usrlib dizinine kopyala.
-# /opt/flink/usrlib/ dizinindeki JAR'lar Flink tarafından otomatik olarak classpath'e eklenir, ancak job submit işlemi ayrıca yapılmalıdır.
+# S3 Checkpoint Desteği: Flink'in DO Spaces'e (S3 API) checkpoint yazabilmesi için
+# gerekli Hadoop AWS plugin'i Flink'in plugin dizinine kopyalanır.
+# Flink, /opt/flink/plugins/ altındaki JAR'ları otomatik classloader'a yükler.
+# flink-s3-fs-hadoop → Flink'in S3 dosya sistemini tanımasını sağlayan resmi plugin
 COPY --from=builder /build/target/flink-tweets-stream-1.0-SNAPSHOT.jar /opt/flink/usrlib/flink-tweets-stream.jar
+RUN cp /opt/flink/opt/flink-s3-fs-hadoop-1.18.0.jar /opt/flink/plugins/s3-fs-hadoop/ \
+    || (mkdir -p /opt/flink/plugins/s3-fs-hadoop/ && cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/s3-fs-hadoop/)
 
 # Özel başlatma scriptini kopyala ve çalıştırılabilir yap.
 # Bu script: JobManager başlat → REST API hazır olana kadar bekle → job submit et
