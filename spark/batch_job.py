@@ -156,42 +156,125 @@ def transform_and_compute_metrics(df):
 
 
 def write_to_postgresql(metrics_df):
-    """Batch metriklerini PostgreSQL batch_tweet_metrics tablosuna JDBC ile yazar."""
-    print("[INFO] Truncating table with psycopg2...")
-    
-    # JDBC'nin tabloyu silmeye (DROP) çalışıp View'ları bozmasını engellemek için 
-    # tabloyu manuel olarak truncate ediyoruz.
+    """
+    Batch metriklerini PostgreSQL'e Atomic Table Swap stratejisiyle yazar.
+
+    Eski yaklaşımda (TRUNCATE → append) Spark yazımı süresince ana tablo boştu.
+    Bu sürede unified_metrics view'ı geçmiş verileri gösteremiyordu (Data Downtime).
+
+    Yeni yaklaşım:
+    1. Staging tabloyu temizle (batch_tweet_metrics_staging)
+    2. Spark verileri staging'e yazsın (bu dakikalar sürebilir — ana tablo dokunulmaz)
+    3. Tek transaction içinde tabloları RENAME ile yer değiştir (~milisaniye)
+       → Böylece unified_metrics view'ı hiçbir zaman boş batch verisi görmez.
+    """
+    staging_table = "batch_tweet_metrics_staging"
+
+    conn_params = {
+        "host": "postgres",
+        "port": 5432,
+        "database": os.environ.get("ANALYTICS_DB", "twitter_metrics"),
+        "user": PG_USER,
+        "password": PG_PASSWORD
+    }
+
+    # ── Adım 1: Staging tabloyu temizle ──────────────────────────
+    print(f"[INFO] Truncating staging table ({staging_table})...")
     try:
-        conn_params = {
-            "host": "postgres",
-            "port": 5432,
-            "database": os.environ.get("ANALYTICS_DB", "twitter_metrics"),
-            "user": PG_USER,
-            "password": PG_PASSWORD
-        }
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"TRUNCATE TABLE {PG_TABLE} CASCADE;")
-                print(f"[INFO] Table {PG_TABLE} truncated successfully.")
+                cur.execute(f"TRUNCATE TABLE {staging_table};")
+                print(f"[INFO] Staging table truncated.")
     except Exception as e:
-        print(f"[WARNING] Truncate failed: {e}. Attempting to proceed with Spark write.")
+        print(f"[WARNING] Staging truncate failed: {e}. Proceeding anyway.")
 
-    print("[INFO] Writing to PostgreSQL via Spark (append mode)...")
-
-    # Mode 'append' kullanıyoruz çünkü tabloyu az önce manuel boşalttık.
-    # Bu sayede Spark tabloyu silmeye (drop) çalışmayacak ve View'larımız sağlam kalacak.
+    # ── Adım 2: Spark ile staging tabloya yaz (uzun süren kısım) ─
+    # Bu sırada ana tablo (batch_tweet_metrics) hâlâ eski verileri servis eder.
+    # unified_metrics view'ı kesintisiz çalışmaya devam eder.
+    print(f"[INFO] Writing to staging table ({staging_table}) via Spark...")
     (
         metrics_df.write.format("jdbc")
         .option("url", PG_URL)
-        .option("dbtable", PG_TABLE)
+        .option("dbtable", staging_table)
         .option("user", PG_USER)
         .option("password", PG_PASSWORD)
         .option("driver", "org.postgresql.Driver")
-        .mode("append") 
+        .mode("append")
         .save()
     )
+    print("[INFO] Spark write to staging completed.")
 
-    print("[INFO] PostgreSQL write completed.")
+    # ── Adım 3: Atomic Table Swap (tek transaction, ~milisaniye) ─
+    # RENAME işlemi sadece PostgreSQL metadata'sını günceller, veri kopyalamaz.
+    # Transaction commit olana kadar diğer bağlantılar eski tabloyu görmeye devam eder.
+    print("[INFO] Performing atomic table swap (staging → main)...")
+    try:
+        conn = psycopg2.connect(**conn_params)
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        # 3a. unified_metrics view'ı batch_tweet_metrics'e bağımlı → önce kaldır
+        cur.execute("DROP VIEW IF EXISTS unified_metrics;")
+
+        # 3b. Ana tabloyu geçici isme taşı
+        cur.execute(f"ALTER TABLE {PG_TABLE} RENAME TO {PG_TABLE}_old;")
+
+        # 3c. Staging'i ana tablo ismine taşı
+        cur.execute(f"ALTER TABLE {staging_table} RENAME TO {PG_TABLE};")
+
+        # 3d. View'ı yeniden oluştur (artık yeni verilerle)
+        cur.execute("""
+            CREATE OR REPLACE VIEW unified_metrics AS
+            SELECT 
+                airline, tweet_count, positive_count, negative_count, neutral_count,
+                positive_ratio, negative_ratio, avg_retweet, max_retweet,
+                tweet_rate, window_start, window_end, 'BATCH' as source
+            FROM batch_tweet_metrics
+            UNION ALL
+            SELECT 
+                airline, tweet_count, positive_count, negative_count, neutral_count,
+                positive_ratio, negative_ratio, avg_retweet, max_retweet,
+                tweet_rate, window_start, window_end, 'REAL-TIME' as source
+            FROM tweet_metrics
+            WHERE window_start >= COALESCE(
+                (SELECT MAX(window_end) FROM batch_tweet_metrics), '1970-01-01'
+            );
+        """)
+
+        # 3e. Eski tabloyu sil
+        cur.execute(f"DROP TABLE IF EXISTS {PG_TABLE}_old;")
+
+        # 3f. Bir sonraki batch için boş staging tabloyu yeniden oluştur
+        cur.execute(f"""
+            CREATE TABLE {staging_table} (
+                id              SERIAL PRIMARY KEY,
+                airline         VARCHAR(100) NOT NULL,
+                tweet_count     BIGINT,
+                positive_count  BIGINT,
+                negative_count  BIGINT,
+                neutral_count   BIGINT,
+                positive_ratio  DOUBLE PRECISION,
+                negative_ratio  DOUBLE PRECISION,
+                avg_retweet     DOUBLE PRECISION,
+                max_retweet     BIGINT,
+                tweet_rate      DOUBLE PRECISION,
+                window_start    TIMESTAMP,
+                window_end      TIMESTAMP,
+                created_at      TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("[INFO] Atomic swap completed — zero downtime!")
+
+    except Exception as e:
+        print(f"[ERROR] Atomic swap failed, rolling back: {e}")
+        conn.rollback()
+        cur.close()
+        conn.close()
+        raise
 
 
 def prune_speed_layer(spark, metrics_df):

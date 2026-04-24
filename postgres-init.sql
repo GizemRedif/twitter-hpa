@@ -48,6 +48,31 @@ CREATE TABLE batch_tweet_metrics (
 );
 
 -- =============================================
+-- Staging Table (Atomic Swap için)
+-- Spark batch job'u verileri önce bu tabloya yazar.
+-- Yazma bitince tek transaction içinde ana tabloyla
+-- yer değiştirilir (RENAME). Böylece unified_metrics
+-- view'ı hiçbir zaman boş batch verisi görmez.
+-- Özellikle dashboard işlemleri için şarttır. 
+-- =============================================
+CREATE TABLE batch_tweet_metrics_staging (
+    id              SERIAL PRIMARY KEY,
+    airline         VARCHAR(100) NOT NULL,
+    tweet_count     BIGINT,
+    positive_count  BIGINT,
+    negative_count  BIGINT,
+    neutral_count   BIGINT,
+    positive_ratio  DOUBLE PRECISION,
+    negative_ratio  DOUBLE PRECISION,
+    avg_retweet     DOUBLE PRECISION,
+    max_retweet     BIGINT,
+    tweet_rate      DOUBLE PRECISION,
+    window_start    TIMESTAMP,
+    window_end      TIMESTAMP,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- =============================================
 -- Unified Serving Layer View
 -- Speed Layer (tweet_metrics) + Batch Layer (batch_tweet_metrics)
 -- Batch layer has the "truth", Speed layer provides the most recent "delta"

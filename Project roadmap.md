@@ -193,6 +193,7 @@ Data lake duplice kontrolü kaldırıldı.
 ### 10. Cloud Migration — DigitalOcean Spaces (S3) Integration
 
 > commit: feat: Migrate Data Lake to DigitalOcean Spaces (S3) and make architecture stateless
+
 Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyumlu (cloud-native) **DigitalOcean Spaces (S3 API)** altyapısına taşındı (Henüz droplet yok, sadece spaces):
 
 #### Data Lake — S3 Geçişi
@@ -213,7 +214,7 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
 #### Altyapı Temizliği
 - `docker-compose.yml` içerisindeki Data Lake ve Batch Output klasörlerine ait yerel `volumes` tanımları kaldırılarak sunucu "stateless" (durumsuz) hale getirildi.
 
-> commit:  
+> commit: feat: complete cloud-native migration with S3 landing zone, remote logging, and flink checkpoints
 
 #### Flink Checkpoint → S3 Taşıması
 - **Sorun:** Flink checkpoint verileri konteyner içinde kalıyordu. Konteyner çöktüğünde veya yeniden başlatıldığında Flink'in durumu (state) sıfırlanıyor ve Kafka'dan tüm verileri baştan işlemek zorunda kalıyordu.
@@ -239,6 +240,16 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
   - `kafka_producer/producer.py` güncellenerek lokal `with open()` yerine `s3fs` kullanılarak doğrudan S3 üzerinden okuma yapacak şekilde refactor edildi.
   - `docker-compose.yml` içerisindeki `kafka-producer` servisine `.env` bağlantısı eklendi.
 - **Sonuç:** Droplet tamamen "Stateless" bir "Compute" birimine dönüştü. Veri sisteme dışarıdan S3 aracılığıyla giriyor ve işleniyor.
+
+> commit: fix: resolve Data Downtime Flaw using Atomic Table Swap
+
+#### Data Downtime Flaw Çözümü (Atomic Table Swap)
+- **Sorun:** Spark batch job'u `batch_tweet_metrics` tablosunu `TRUNCATE CASCADE` ile silip ardından verileri append metoduyla yazıyordu. Spark'ın verileri yazması dakikalar sürdüğü için, bu süre zarfında tablo tamamen boş kalıyor ve Lambda mimarisinin sunum katmanındaki `unified_metrics` view'ı geçmiş verileri gösteremiyordu (Data Downtime / Kesinti problemi).
+- **Çözüm:** Atomic Table Swap stratejisi uygulandı:
+  - `postgres-init.sql` içerisine `batch_tweet_metrics_staging` isimli geçici bir tablo eklendi.
+  - `batch_job.py` güncellenerek Spark'ın tüm veriyi önce bu staging tablosuna yazması sağlandı. Bu işlem sırasında ana tablo (`batch_tweet_metrics`) okunmaya devam edilebilir halde kaldı.
+  - Spark yazma işlemi bittikten sonra tek bir PostgreSQL transaction'ı içinde `ALTER TABLE RENAME` komutları ile staging ve ana tablo milisaniyeler içinde yer değiştirildi (Atomic Swap).
+  - Böylece view'in sorgu attığı tabloda hiçbir zaman boş veri kalmadı ve veri kesintisi (downtime) sıfıra indirildi.
 
 ---
 
