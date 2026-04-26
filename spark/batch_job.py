@@ -158,16 +158,11 @@ def transform_and_compute_metrics(df):
 def write_to_postgresql(metrics_df):
     """
     Batch metriklerini PostgreSQL'e Atomic Table Swap stratejisiyle yazar.
-
-    Eski yaklaşımda (TRUNCATE → append) Spark yazımı süresince ana tablo boştu.
-    Bu sürede unified_metrics view'ı geçmiş verileri gösteremiyordu (Data Downtime).
-
-    Yeni yaklaşım:
     1. Staging tabloyu temizle (batch_tweet_metrics_staging)
     2. Spark verileri staging'e yazsın (bu dakikalar sürebilir — ana tablo dokunulmaz)
     3. Tek transaction içinde tabloları RENAME ile yer değiştir (~milisaniye)
-       → Böylece unified_metrics view'ı hiçbir zaman boş batch verisi görmez.
-    """
+       Böylece unified_metrics view'ı hiçbir zaman boş batch verisi görmez.
+    """ 
     staging_table = "batch_tweet_metrics_staging"
 
     conn_params = {
@@ -178,7 +173,7 @@ def write_to_postgresql(metrics_df):
         "password": PG_PASSWORD
     }
 
-    # ── Adım 1: Staging tabloyu temizle ──────────────────────────
+    # ------------- Adım 1: Staging tabloyu temizle -------------
     print(f"[INFO] Truncating staging table ({staging_table})...")
     try:
         with psycopg2.connect(**conn_params) as conn:
@@ -188,7 +183,7 @@ def write_to_postgresql(metrics_df):
     except Exception as e:
         print(f"[WARNING] Staging truncate failed: {e}. Proceeding anyway.")
 
-    # ── Adım 2: Spark ile staging tabloya yaz (uzun süren kısım) ─
+    # ------------- Adım 2: Spark ile staging tabloya yaz (uzun süren kısım) -------------
     # Bu sırada ana tablo (batch_tweet_metrics) hâlâ eski verileri servis eder.
     # unified_metrics view'ı kesintisiz çalışmaya devam eder.
     print(f"[INFO] Writing to staging table ({staging_table}) via Spark...")
@@ -204,22 +199,32 @@ def write_to_postgresql(metrics_df):
     )
     print("[INFO] Spark write to staging completed.")
 
-    # ── Adım 3: Atomic Table Swap (tek transaction, ~milisaniye) ─
-    # RENAME işlemi sadece PostgreSQL metadata'sını günceller, veri kopyalamaz.
-    # Transaction commit olana kadar diğer bağlantılar eski tabloyu görmeye devam eder.
-    print("[INFO] Performing atomic table swap (staging → main)...")
+    # ------------- Adım 3: Atomic Table Swap (tek transaction, ~milisaniye) -------------
+    # batch_tweet_metrics_staging'in ismi batch_tweet_metrics yapılacak. (RENAME)
+    # RENAME sırasında veri taşıma olmadığından (sadece PostgreSQL metadatası güncellenir) işlem çok kısa sürer. 
+    
+    # Önemli! Bir tabloya ait partition'un ismiyle başka tabloya ait bile olsa aynı isimde bir partition oluşturamazsınız. (Aynı şema içinde aynı isimde iki tablo olamaz)
+    # Staging tabloyu orjinal yaptığında partition tabloların adı değişmez. Yeni staging tablo için aynı isimde bir partition oluşturmaya çalışırsan da isim çakışması olur (ör batch_staging_2015_01 tamamen bitmemiş olabilir ve kullanmaya devam ediyor olabilir). 
+    # Çözüm: Eski tabloyu (içinde bir önceki saatin verilerini barındıran ana tablo) DROP CASCADE ile tamamen silip, staging'i rename ettikten sonra yeni staging'i tamamen sıfırdan oluşturuyoruz.
+    
+    # Yani aşağıdaki adımlar:
+    # Artık eski kalmış batch_tweet_metrics tablosu tamamen silinir
+    # İçi yeni veriyle dolu batch_tweet_metrics_staging tablo yeni batch_tweet_metrics tablosu olur (RENAME)
+    # Bir sonraki saat Spark tekrar çalışabilsin diye, adını değiştirdiğimiz o yedek tablonun yerine bomboş yeni bir yedek tablo (batch_tweet_metrics_staging) yarat (CREATE)
+
+    print("[INFO] Performing atomic table swap (staging -> main)...")
     try:
-        conn = psycopg2.connect(**conn_params)
+        conn = psycopg2.connect(**conn_params) 
         conn.autocommit = False
         cur = conn.cursor()
 
-        # 3a. unified_metrics view'ı batch_tweet_metrics'e bağımlı → önce kaldır
+        # 3a. unified_metrics view'ı batch_tweet_metrics'e bağımlı -> önce kaldır
         cur.execute("DROP VIEW IF EXISTS unified_metrics;")
 
-        # 3b. Ana tabloyu geçici isme taşı
-        cur.execute(f"ALTER TABLE {PG_TABLE} RENAME TO {PG_TABLE}_old;")
+        # 3b. Eski ana tabloyu CASCADE ile tamamen sil (child partition'lar dahil)
+        cur.execute(f"DROP TABLE IF EXISTS {PG_TABLE} CASCADE;")
 
-        # 3c. Staging'i ana tablo ismine taşı
+        # 3c. Staging'i ana tablo ismine taşı (Altındaki partition isimleri aynı kalır, ama bu sorun değil çünkü yeni staging oluştururken farklı isimler kullanacağız.)
         cur.execute(f"ALTER TABLE {staging_table} RENAME TO {PG_TABLE};")
 
         # 3d. View'ı yeniden oluştur (artık yeni verilerle)
@@ -241,13 +246,11 @@ def write_to_postgresql(metrics_df):
             );
         """)
 
-        # 3e. Eski tabloyu sil
-        cur.execute(f"DROP TABLE IF EXISTS {PG_TABLE}_old;")
-
-        # 3f. Bir sonraki batch için boş staging tabloyu yeniden oluştur
+        # 3e. Bir sonraki batch için boş staging tabloyu yeniden oluştur
+        #     Partitioned tablo yapısıyla oluşturulmalı (ana tablo ile aynı yapı).
         cur.execute(f"""
             CREATE TABLE {staging_table} (
-                id              SERIAL PRIMARY KEY,
+                id              SERIAL,
                 airline         VARCHAR(100) NOT NULL,
                 tweet_count     BIGINT,
                 positive_count  BIGINT,
@@ -258,10 +261,22 @@ def write_to_postgresql(metrics_df):
                 avg_retweet     DOUBLE PRECISION,
                 max_retweet     BIGINT,
                 tweet_rate      DOUBLE PRECISION,
-                window_start    TIMESTAMP,
+                window_start    TIMESTAMP NOT NULL,
                 window_end      TIMESTAMP,
                 created_at      TIMESTAMP DEFAULT NOW()
-            );
+            ) PARTITION BY RANGE (window_start);
+        """)
+        import time
+        ts = int(time.time())
+        # Staging partition'ları oluştur (İsim çakışmasını önlemek için dinamik timestamp ekliyoruz)
+        cur.execute(f"""
+            CREATE TABLE batch_staging_{ts}_2015_01 PARTITION OF {staging_table}
+                FOR VALUES FROM ('2015-01-01') TO ('2015-02-01');
+            CREATE TABLE batch_staging_{ts}_2015_02 PARTITION OF {staging_table}
+                FOR VALUES FROM ('2015-02-01') TO ('2015-03-01');
+            CREATE TABLE batch_staging_{ts}_2015_03 PARTITION OF {staging_table}
+                FOR VALUES FROM ('2015-03-01') TO ('2015-04-01');
+            CREATE TABLE batch_staging_{ts}_default PARTITION OF {staging_table} DEFAULT;
         """)
 
         conn.commit()
@@ -282,7 +297,7 @@ def prune_speed_layer(spark, metrics_df):
     Batch job başarıyla tamamlandıktan sonra, batch'e giren eski verileri 
     Speed Layer (PostgreSQL - tweet_metrics) tablosundan temizler.
     Bu, Lambda mimarisinde 'Recomputation' sonrası temizlik adımıdır.
-    """
+    """ 
     print("[INFO] Pruning old data from Speed Layer (tweet_metrics)...")
     
     # Batch'e giren en son window_end zamanını bul

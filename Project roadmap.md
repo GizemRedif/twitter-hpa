@@ -9,10 +9,27 @@
 | tweets.metrics | Flink'in hesapladığı 1 dakikalık pencere metrikleri (AVRO) | 2 | 3 gün |
 
 - Partition ve replication factor belirlendi.
-- Proje süreci boyunca bazı tasarım kararları değişti (örn. Spark'ın kaynağı MongoDB yerine Parquet Data Lake olarak güncellendi).
+- Proje süreci boyunca bazı tasarım kararları değişti (örn. Spark'ın kaynağı MongoDB yerine Parquet Data Lake olarak güncellendi). 
 
+**Kullanılan Depolama Sistemleri ve Amaçları:**
+- **Apache Kafka:** Gerçek zamanlı veri akışını yönetmek ve servisler arası geçici tampon bölge (buffer/log) oluşturmak için kullanıldı. Belirli bir süre (retention) veriyi tutar, ardından siler. 
+- **DigitalOcean Spaces (S3 - Data Lake):** Sınırsız ölçeklenebilir ve uygun maliyetli Cold Storage. Ham tweet'leri (`raw_tweets` parquet olarak), Spark batch sonuçlarını, Flink checkpoint'lerini ve Airflow loglarını barındırır. Droplet sunucusunu stateless hale getirmemizi sağlar. 
+- **PostgreSQL (Serving Layer):** Hızlı ve ilişkisel SQL sorguları için Sunum Katmanı. Spark (Batch) ve Flink'in (Speed) hesapladığı karmaşık metrikleri, Dashboard'ların saniyeler içinde okuyabilmesi için vitrin görevi görür. Ayrıca Airflow'un metadata veritabanıdır. 
+Spark sonuçları sadece S3'e yazılıyor olsaydı dashboard her yenilendiğinde S3'ten okuma yapacaktı ve inanılmaz yavaş olacaktı. 
+Spark her çalıştığında Flink'in anlık hesapladığı ve `tweet_metrics` tablosuna yazdığı veriler otomatik silinir. Bunun amacı gereksiz depolama kullanılmamasıdır. Çünkü bir saat içerisinde sorgulama gerekirse Flink çıktıları kullanılacak, Spark hesaplama yaptıktan sonra kesin sonuçlar olduğu için Spark çıktıları kullanılacak ve artık Flink'in hesapladıklarına ihtiyacımız kalmayacak. 
+Ayrıca veritabanında `batch_tweet_metrics_staging` isimli geçici bir tablo daha bulunur. Spark uzun süren hesaplamalarını doğrudan ana tabloya yazmak yerine önce bu tabloya yazar, yazma bitince tablolar anında (Atomic Swap ile) yer değiştirir. Bu sayede Spark yazarken Dashboard'larda "sıfır veri kesintisi (Zero Data Downtime)" sağlanır.
+- **MongoDB:** Yüksek hızlı ve esnek şemalı (NoSQL) doküman veritabanı. Flink'in anlık yakaladığı "Negatif Duygu" alert tweet'lerini çok hızlı bir şekilde kaydetmek ve endekslemek için kullanıldı.  
 ---
 
+### Notlar & Tasarım Kararları
+- Producer başlangıçta JSON üretiyordu, Schema Registry eklenerek AVRO'ya geçildi.
+- `Tweet.java` POJO başlangıçta kullanılıyordu; işlem karmaşıklığı artınca `GenericRecord` kullanımına geçildi ve `Tweet.java` silindi.
+- Spark başlangıçta MongoDB'den okuyacak şekilde planlandı; Parquet Data Lake'e geçilmesiyle Spark'ın kaynağı değiştirildi.
+- Tüm hassas bilgiler (şifreler vs.) `.env` dosyasına taşındı, `.env.example` hazırlandı, `.gitignore` güncellendi.
+- İnterpreterden kaynaklı hata olarak gösterilen, ama aslında kodun çalışmasında hiçbir şekilde sıkıntı oluşturmayan hatalar `# type: ignore` yorum satırı ile gizlenmiştir. Proje içinde `# type: ignore` yorum satırları bu nedenle vardır.
+
+---
+ 
 ### 2. Local Infrastructure 
 Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
 - Zookeeper (healthcheck ile)
@@ -181,14 +198,7 @@ Data lake duplice kontrolü kaldırıldı.
 
 ---
 
-### Notlar & Tasarım Kararları
-- Producer başlangıçta JSON üretiyordu, Schema Registry eklenerek AVRO'ya geçildi.
-- `Tweet.java` POJO başlangıçta kullanılıyordu; işlem karmaşıklığı artınca `GenericRecord` kullanımına geçildi ve `Tweet.java` silindi.
-- Spark başlangıçta MongoDB'den okuyacak şekilde planlandı; Parquet Data Lake'e geçilmesiyle Spark'ın kaynağı değiştirildi.
-- Tüm hassas bilgiler (şifreler vs.) `.env` dosyasına taşındı, `.env.example` hazırlandı, `.gitignore` güncellendi.
-- İnterpreterden kaynaklı hata olarak gösterilen, ama aslında kodun çalışmasında hiçbir şekilde sıkıntı oluşturmayan hatalar `# type: ignore` yorum satırı ile gizlenmiştir. Proje içinde `# type: ignore` yorum satırları bu nedenle vardır.
 
----
 
 ### 10. Cloud Migration — DigitalOcean Spaces (S3) Integration
 
@@ -244,23 +254,41 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
 > commit: fix: resolve Data Downtime Flaw using Atomic Table Swap
 
 #### Data Downtime Flaw Çözümü (Atomic Table Swap)
-- **Sorun:** Spark batch job'u `batch_tweet_metrics` tablosunu `TRUNCATE CASCADE` ile silip ardından verileri append metoduyla yazıyordu. Spark'ın verileri yazması dakikalar sürdüğü için, bu süre zarfında tablo tamamen boş kalıyor ve Lambda mimarisinin sunum katmanındaki `unified_metrics` view'ı geçmiş verileri gösteremiyordu (Data Downtime / Kesinti problemi).
+- **Sorun:** Spark batch job'u `batch_tweet_metrics` tablosunu `TRUNCATE CASCADE` ile silip ardından verileri append metoduyla yazıyordu. Spark'ın verileri yazması dakikalar sürdüğü için, bu süre zarfında tablo tamamen boş kalıyor ve Lambda mimarisinin sunum katmanındaki `unified_metrics` view'ı geçmiş verileri gösteremiyordu (Data Downtime / Kesinti problemi). 
 - **Çözüm:** Atomic Table Swap stratejisi uygulandı:
-  - `postgres-init.sql` içerisine `batch_tweet_metrics_staging` isimli geçici bir tablo eklendi.
+  - `postgres-init.sql` içerisine `batch_tweet_metrics_staging` isimli geçici bir tablo eklendi. Özellikle dashboard işlemleri için şarttır. 
   - `batch_job.py` güncellenerek Spark'ın tüm veriyi önce bu staging tablosuna yazması sağlandı. Bu işlem sırasında ana tablo (`batch_tweet_metrics`) okunmaya devam edilebilir halde kaldı.
   - Spark yazma işlemi bittikten sonra tek bir PostgreSQL transaction'ı içinde `ALTER TABLE RENAME` komutları ile staging ve ana tablo milisaniyeler içinde yer değiştirildi (Atomic Swap).
   - Böylece view'in sorgu attığı tabloda hiçbir zaman boş veri kalmadı ve veri kesintisi (downtime) sıfıra indirildi.
 
 ---
 
-### 11. Database & Performance Optimization (Planlanıyor...)
-- [ ] **MongoDB Indexing:** Alert aramaları için airline ve sentiment bazlı kompleks indekslerin oluşturulması.
-- [ ] **PostgreSQL Partitioning:** Büyüyen batch verilerinin tarih bazlı parçalanması (Partitioning).
+### 11. Database & Performance Optimization
+
+#### MongoDB Compound Indexing
+-`tweet_alerts` koleksiyonunda her alan için ayrı ayrı tekli indexler tanımlıydı (`airline`, `created_at`). Bu yaklaşım birden fazla alanı kapsayan sorgularda optimal performans sağlayamıyordu.  
+  - Tek alanlı indexler yerine, MongoDB'nin **Prefix Rule** kuralından faydalanan **Compound Indexler** tanımlandı:
+    - `{ airline: 1, created_at: -1 }` → Airline bazlı filtreleme + zaman sıralaması (ör. "Delta'nın son alertleri")
+    - `{ airline: 1, airline_sentiment: 1 }` → Airline + sentiment analiz sorguları
+    - `{ created_at: -1 }` → Global zaman bazlı sıralama ("son 100 alert")
+- **Sonuç:** Daha az index ile daha fazla sorgu paterni hızlandırıldı. Yazma performansı iyileşti (güncellenecek index sayısı azaldı). Disk kullanımı düştü. 
+
+#### PostgreSQL Indexing & Range Partitioning
+- `tweet_metrics` (Speed Layer) tablosunda hiçbir index yoktu; `unified_metrics` view'ının filtreleme sorguları ve `prune_speed_layer` DELETE sorgusu tam tablo taraması yapıyordu. `batch_tweet_metrics` (Batch Layer) tablosu ise zamanla büyüyerek sorgu performansını düşürme riski taşıyordu.
+  - **Speed Layer Indexleri (`tweet_metrics`):**
+    - `idx_tweet_metrics_window_start` → `unified_metrics` view'ındaki `WHERE window_start >= ...` filtresi için
+    - `idx_tweet_metrics_window_end` → `prune_speed_layer` DELETE sorgusu için
+    - `idx_tweet_metrics_airline` → Dashboard airline filtreleme sorguları için
+  - **Batch Layer Range Partitioning (`batch_tweet_metrics`):**
+    - Tablo `PARTITION BY RANGE (window_start)` ile aylık bölümlendirildi.
+    - Aylık partition'lar oluşturuldu (2015-01, 2015-02, 2015-03) + `DEFAULT` partition (beklenmeyen tarihleri yakalamak için).
+    - Partition tabloları üzerinde `airline` ve `window_start` indexleri tanımlandı (otomatik olarak tüm partition'lara uygulanır).
+    - Staging tablosu (`batch_tweet_metrics_staging`) da aynı partitioned yapıda oluşturularak Atomic Table Swap uyumluluğu sağlandı.
+  - **Atomic Table Swap Güncellendi (`batch_job.py`):**
+    - Partitioned tablolarda `ALTER TABLE RENAME` işlemi child partition isimlerini değiştirmediği için, swap mekanizması güncellendi: eski ana tablo `DROP CASCADE` ile silinir, staging rename edilir. Ardından, bir sonraki işlemin isim çakışmasına neden olmaması için yeni staging partition'ları **dinamik zaman damgası (timestamp)** eklenerek sıfırdan oluşturulur.
+    - `PRIMARY KEY` kısıtlaması kaldırıldı (PostgreSQL partitioned tablolarda PK'nin partition key'i içermesini zorunlu kılar).
+- **Sonuç:** PostgreSQL sorgu süreleri büyük tablolarda dramatik şekilde azaldı (Partition Pruning sayesinde sadece ilgili partition taranır). Speed Layer sorguları index kullanarak çalışır hale geldi.
 
 ---
-
-
-
-
 
 
