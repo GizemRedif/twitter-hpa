@@ -1,7 +1,17 @@
+# --- GLOBAL LOGGING CONFIGURATION ---
+# Konteyner loglarının Droplet diskini (SSD) doldurmaması için limit koyuyoruz.
+# Her servis için max 10MB boyutunda 3 adet log dosyası tutulur.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
+    logging: *default-logging
     container_name: zookeeper
     ports:
       - "2181:2181"
@@ -20,6 +30,7 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    logging: *default-logging
     container_name: kafka
     depends_on:
       zookeeper:
@@ -46,6 +57,7 @@ services:
   # tweets.metrics: 2 partition, 3 gün retention
   init-kafka:
     image: confluentinc/cp-kafka:7.5.0
+    logging: *default-logging
     container_name: init-kafka
     depends_on:
       kafka:
@@ -75,6 +87,7 @@ services:
   # Dış Ağ Adresi (Senin bilgisayarından): http://localhost:8083
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
+    logging: *default-logging
     container_name: schema-registry
     depends_on:
       kafka:
@@ -92,6 +105,7 @@ services:
 
   kafka-producer:
     build: ./kafka_producer
+    logging: *default-logging
     container_name: kafka-producer
     depends_on:
       schema-registry:
@@ -108,6 +122,7 @@ services:
   # 2. twitter_metrics → Analytics verileri (postgres-init.sql ile oluşturulur)
   postgres:
     image: postgres:15
+    logging: *default-logging
     container_name: postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -117,18 +132,22 @@ services:
       - "5432:5432"
     volumes:
       - ./postgres-init.sql:/docker-entrypoint-initdb.d/init-metrics.sql:ro
+      - postgres_data:/var/lib/postgresql/data #Bu kısım verileri kalıcı tutar, en alttaki named volume'a bağlanıyor
 
   mongo:
     image: mongo:7
+    logging: *default-logging
     container_name: mongo
     ports:
       - "27018:27017"
     volumes:
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - mongo_data:/data/db #Bu kısım verileri kalıcı tutar, en alttaki named volume'a bağlanıyor
 
   # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   mongo-alert-consumer:
     build: ./mongo_alert_consumer
+    logging: *default-logging
     container_name: mongo-alert-consumer
     depends_on:
       schema-registry:
@@ -142,6 +161,7 @@ services:
   # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   parquet-raw-consumer:
     build: ./parquet_raw_consumer
+    logging: *default-logging
     container_name: parquet-raw-consumer
     depends_on:
       schema-registry:
@@ -155,6 +175,7 @@ services:
   # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   pg-metrics-consumer:
     build: ./pg_metrics_consumer
+    logging: *default-logging
     container_name: pg-metrics-consumer
     depends_on:
       schema-registry:
@@ -176,6 +197,7 @@ services:
   # Özel Dockerfile ile apache-airflow-providers-amazon paketi eklendi.
   airflow:
     build: ./airflow
+    logging: *default-logging
     container_name: airflow
     depends_on:
       - postgres
@@ -217,6 +239,7 @@ services:
   # FLINK_PROPERTIES ile S3 checkpoint/savepoint ayarları eklendi.
   flink-jobmanager:
     build: ./flink-tweets-stream
+    logging: *default-logging
     container_name: flink-jobmanager
     ports:
       - "8082:8081"
@@ -252,6 +275,7 @@ services:
   # FLINK_PROPERTIES ile S3 checkpoint/savepoint ayarları eklendi.
   flink-taskmanager:
     build: ./flink-tweets-stream
+    logging: *default-logging
     container_name: flink-taskmanager
     env_file:
       - .env
@@ -283,6 +307,7 @@ services:
   # Job bitince container durur (restart: "no").
   spark-submit:
     build: ./spark
+    logging: *default-logging
     container_name: spark-submit
     env_file:
       - .env
@@ -315,6 +340,7 @@ services:
   # Web UI 8084 portunda çalışır. 
   spark-master:
     build: ./spark
+    logging: *default-logging
     container_name: spark-master
     ports:
       - "8084:8080"
@@ -327,6 +353,7 @@ services:
   # 1 core ve 1G memory ile çalışır.
   spark-worker:
     build: ./spark
+    logging: *default-logging
     container_name: spark-worker
     environment:
       SPARK_WORKER_CORES: 1
@@ -348,6 +375,7 @@ services:
   # Kontroller: Şema doğrulama, null kontrolü, sentiment tutarlılığı, oran aralıkları, duplicate tespiti, toplam tutarlılık. 
   data-quality-check:
     build: ./data_quality
+    logging: *default-logging
     container_name: data-quality-check
     env_file:
       - .env
@@ -357,3 +385,16 @@ services:
       - postgres
       - mongo
     restart: "no"
+
+# --------------------------------------------------------------------------------------------------------------------------
+# Veritabanındaki verilerin kalıcı olmasını sağlamak için. docker compose down yapıldığında veriler silinmez.
+# ----  
+# Veritabanları normalde verileri konteynerin içindeki sanal ve geçici bir bellekte tutar. 
+# Eğer Docker'ı silersen içindeki veriler de uçar. 
+# Bu kısım, veriyi Docker'ın içinden çıkarıp Droplet'in kendi fiziksel hard diskine yazmasını sağlar. Bu, sistem çalıştığı sürece sürekli ve anlık gerçekleşir. 
+# Ancak bu da yeterli değildir, Droplet (sunucu) çökerse yine tüm veri gider. 
+# Bu nedenle backup_job.sh scripti buradaki verileri düzenli alıp space'e (S3) kaydeder (arşiv şeklinde, tek parça halinde) ve böylece veri güvenliğini sağlar.
+# Ayrıca sunucu diskini doldurmamak için lokaldeki 3 günden eski yedekleri temizler. 
+volumes:
+  postgres_data:
+  mongo_data:

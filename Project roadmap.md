@@ -265,6 +265,8 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
 
 ### 11. Database & Performance Optimization
 
+ > Commit: Add database indexing and table partitioning optimizations
+
 #### MongoDB Compound Indexing
 -`tweet_alerts` koleksiyonunda her alan için ayrı ayrı tekli indexler tanımlıydı (`airline`, `created_at`). Bu yaklaşım birden fazla alanı kapsayan sorgularda optimal performans sağlayamıyordu.  
   - Tek alanlı indexler yerine, MongoDB'nin **Prefix Rule** kuralından faydalanan **Compound Indexler** tanımlandı:
@@ -288,6 +290,28 @@ Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyum
     - Partitioned tablolarda `ALTER TABLE RENAME` işlemi child partition isimlerini değiştirmediği için, swap mekanizması güncellendi: eski ana tablo `DROP CASCADE` ile silinir, staging rename edilir. Ardından, bir sonraki işlemin isim çakışmasına neden olmaması için yeni staging partition'ları **dinamik zaman damgası (timestamp)** eklenerek sıfırdan oluşturulur.
     - `PRIMARY KEY` kısıtlaması kaldırıldı (PostgreSQL partitioned tablolarda PK'nin partition key'i içermesini zorunlu kılar).
 - **Sonuç:** PostgreSQL sorgu süreleri büyük tablolarda dramatik şekilde azaldı (Partition Pruning sayesinde sadece ilgili partition taranır). Speed Layer sorguları index kullanarak çalışır hale geldi.
+
+---
+
+### 12. Production Readiness & Cloud Optimization (Droplet Preparation)
+
+> Commit: feat: Implement data persistence, automated backups, and logging limits for Droplet deployment
+
+Droplet (sunucu) geçişi öncesinde sistemin sürdürülebilirliği ve güvenliği için kritik optimizasyonlar yapıldı:
+
+#### Veritabanı Kalıcılığı (Data Persistence)
+- `docker-compose.yml` dosyasına `postgres_data` ve `mongo_data` named volume'ları eklendi.
+- PostgreSQL ve MongoDB verilerinin Droplet diskinde (SSD) kalıcı olarak saklanması sağlandı. `docker compose down` komutuyla verilerin silinmesi engellendi.
+
+#### Otomatik Bulut Yedekleme (Automated Backups)
+- `backup_job.sh` scripti oluşturuldu.
+- Script, `docker exec` ile PostgreSQL ve MongoDB'den canlı dump alır ve bu yedekleri **amazon/aws-cli** konteyneri üzerinden doğrudan **DigitalOcean Spaces (S3)** bucket'ına yükler.
+- Sunucu diskini korumak için 3 günden eski yerel yedekleri otomatik temizleyen mekanizma eklendi.
+
+#### Kaynak ve Disk Yönetimi (Logging Limits)
+- Tüm Docker servisleri için global log limitleri tanımlandı (`max-size: 10m`, `max-file: 3`).
+- Streaming araçlarının (Kafka, Flink) ürettiği yoğun logların Droplet diskini doldurması engellendi.
+- YAML Anchor kullanılarak tüm servislerde standart ve merkezi log yönetimi sağlandı.
 
 ---
 
