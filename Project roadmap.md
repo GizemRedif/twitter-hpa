@@ -1,4 +1,12 @@
-### 1. Genel Proje Tasarımı
+# Twitter HPA — Project Roadmap
+
+Projenin teknik gelişim süreci, ilk tasarımdan production deployment'a kadar adım adım belgelenmiştir.
+
+---
+
+<details>
+<summary><h3>1. Genel Proje Tasarımı</h3></summary>
+
 - Kullanılacak araçlar ve amaçları belirlendi.
 - Kafka topic'leri belirlendi:
 
@@ -19,18 +27,21 @@ Spark sonuçları sadece S3'e yazılıyor olsaydı dashboard her yenilendiğinde
 Spark her çalıştığında Flink'in anlık hesapladığı ve `tweet_metrics` tablosuna yazdığı veriler otomatik silinir. Bunun amacı gereksiz depolama kullanılmamasıdır. Çünkü bir saat içerisinde sorgulama gerekirse Flink çıktıları kullanılacak, Spark hesaplama yaptıktan sonra kesin sonuçlar olduğu için Spark çıktıları kullanılacak ve artık Flink'in hesapladıklarına ihtiyacımız kalmayacak. 
 Ayrıca veritabanında `batch_tweet_metrics_staging` isimli geçici bir tablo daha bulunur. Spark uzun süren hesaplamalarını doğrudan ana tabloya yazmak yerine önce bu tabloya yazar, yazma bitince tablolar anında (Atomic Swap ile) yer değiştirir. Bu sayede Spark yazarken Dashboard'larda "sıfır veri kesintisi (Zero Data Downtime)" sağlanır.
 - **MongoDB:** Yüksek hızlı ve esnek şemalı (NoSQL) doküman veritabanı. Flink'in anlık yakaladığı "Negatif Duygu" alert tweet'lerini çok hızlı bir şekilde kaydetmek ve endekslemek için kullanıldı.  
----
 
-### Notlar & Tasarım Kararları
+#### Notlar & Tasarım Kararları
 - Producer başlangıçta JSON üretiyordu, Schema Registry eklenerek AVRO'ya geçildi.
 - `Tweet.java` POJO başlangıçta kullanılıyordu; işlem karmaşıklığı artınca `GenericRecord` kullanımına geçildi ve `Tweet.java` silindi.
 - Spark başlangıçta MongoDB'den okuyacak şekilde planlandı; Parquet Data Lake'e geçilmesiyle Spark'ın kaynağı değiştirildi.
 - Tüm hassas bilgiler (şifreler vs.) `.env` dosyasına taşındı, `.env.example` hazırlandı, `.gitignore` güncellendi.
 - İnterpreterden kaynaklı hata olarak gösterilen, ama aslında kodun çalışmasında hiçbir şekilde sıkıntı oluşturmayan hatalar `# type: ignore` yorum satırı ile gizlenmiştir. Proje içinde `# type: ignore` yorum satırları bu nedenle vardır.
 
+</details>
+
 ---
- 
-### 2. Local Infrastructure 
+
+<details>
+<summary><h3>2. Local Infrastructure</h3></summary>
+
 Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
 - Zookeeper (healthcheck ile)
 - Kafka (Zookeeper'a bağımlı, healthcheck ile)
@@ -42,9 +53,13 @@ Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
 - Spark (Master + Worker + Submit)
 - `init-kafka` container'ı ile topic'ler otomatik oluşturuldu.
 
+</details>
+
 ---
 
-### 3. Kafka Data Ingestion
+<details>
+<summary><h3>3. Kafka Data Ingestion</h3></summary>
+
 - Kafka Producer (`kafka_producer/producer.py`) yazıldı:
   - İlk aşamada veriler **JSON** formatında `tweets.raw` topic'ine gönderildi.
   - `Tweets.csv` CSV dosyası okundu, her satır bir Kafka mesajı olarak gönderildi.
@@ -53,9 +68,12 @@ Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
   - `avro-schemas/tweets_raw.avsc` şeması oluşturuldu.
   - `AvroSerializer` ile veriler Schema Registry'e kaydedilerek AVRO olarak gönderildi.
 
+</details>
+
 ---
 
-### 4. Flink Speed Layer 
+<details>
+<summary><h3>4. Flink Speed Layer</h3></summary>
 
 #### Temel Akış
 - Maven ile Flink projesi oluşturuldu (`flink-tweets-stream/`).
@@ -90,9 +108,12 @@ Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
 - `flink-tweets-stream/Dockerfile` ile Maven build → fat JAR → Flink image pipeline kuruldu.
 - `docker-entrypoint-override.sh` ile JobManager ayağa kalktıktan sonra job otomatik submit ediliyor.
 
+</details>
+
 ---
 
-### 5. Data Persistence — Python Kafka Consumer'ları
+<details>
+<summary><h3>5. Data Persistence — Python Kafka Consumer'ları</h3></summary>
 
 #### Alert Consumer (`mongo_alert_consumer/`)
 - `tweets.alert` topic'i dinlendi.
@@ -116,9 +137,13 @@ Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
 - AVRO mesajları deserialize edildi.
 - Her pencere sonucu PostgreSQL `twitter_metrics.tweet_metrics` tablosuna yazıldı (Speed Layer tablosu).
 
+</details>
+
 ---
 
-### 6. PySpark Batch Layer 
+<details>
+<summary><h3>6. PySpark Batch Layer</h3></summary>
+
 - `spark/batch_job.py` PySpark job'u oluşturuldu.
 - Spark kümesi: 1 Master + 1 Worker (1 core, 1G memory) + 1 Submit container.
 - **Kaynak:** Parquet Data Lake (`data/raw_tweets/`)
@@ -129,9 +154,13 @@ Docker Compose (`docker-compose.yml`) ile aşağıdaki servisler kuruldu:
   - PostgreSQL `twitter_metrics.batch_tweet_metrics` tablosu
   - `data/batch_output/` dizinine Parquet
 
+</details>
+
 ---
 
-### 7. Airflow Orkestrasyonu
+<details>
+<summary><h3>7. Airflow Orkestrasyonu</h3></summary>
+
 - Airflow DAG oluşturuldu: `airflow/dags/spark_batch_dag.py`
 - Pipeline sırası:
 
@@ -146,9 +175,13 @@ Spark Batch Job → Data Quality Check
 
 > **Not:** Kafka Producer, streaming mimarisi gereği Airflow döngüsünden bağımsız çalışır. `docker-compose up kafka-producer` ile tek seferlik başlatılır; Airflow yalnızca batch (Spark) ve kalite kontrol adımlarını orkestre eder.
 
+</details>
+
 ---
 
-### 8. Veri Kalite Kontrolü — Data Quality Module
+<details>
+<summary><h3>8. Veri Kalite Kontrolü — Data Quality Module</h3></summary>
+
 `data_quality/dq_check.py` scripti oluşturuldu. Kontrol edilen şeyler:
 
 - **Parquet Data Lake:**
@@ -167,9 +200,12 @@ Spark Batch Job → Data Quality Check
   - Null kontrolü
   - Tüm dokümanların `negative` sentiment olduğunun doğrulanması
 
+</details>
+
 ---
 
-### 9. Bug Fixes & Konfigürasyon Düzeltmeleri
+<details>
+<summary><h3>9. Bug Fixes & Konfigürasyon Düzeltmeleri</h3></summary>
 
 #### Spark-Submit Container Ayakta Tutma
 - **Sorun:** Airflow DAG'ı `docker exec spark-submit ...` ile batch job tetikliyordu, ancak `spark-submit` container'ı ilk job bittikten sonra kapanıyordu (`restart: "no"`). Bu durumda Airflow'un saatlik tetiklemeleri `docker exec` hatası alıyordu.
@@ -179,140 +215,138 @@ Spark Batch Job → Data Quality Check
   - Böylece Airflow her saat başı `docker exec` ile yeni batch job tetikleyebilir.
 
 #### PostgreSQL DB Adı Tutarsızlığı Giderme
-- **Sorun:** `POSTGRES_DB` env var'ı hem postgres container'ın default DB'si (`airflow`) hem de analytics servislerinin bağlandığı DB (`twitter_metrics`) için kullanılıyordu. `docker-compose.yml`'de `POSTGRES_DB: airflow` olarak hardcoded iken, `.env`'de `POSTGRES_DB=twitter_metrics` olarak tanımlıydı — karışıklığa yol açıyordu.
-- **Çözüm:** Analytics DB için ayrı bir `ANALYTICS_DB` env var'ı tanımlandı:
-  - `.env.example`: `POSTGRES_DB` → `ANALYTICS_DB=twitter_metrics` olarak değiştirildi.
-  - `batch_job.py`, `pg_metrics_consumer/consumer.py`, `dq_check.py`: `ANALYTICS_DB` env var'ını kullanacak şekilde güncellendi.
-  - `docker-compose.yml`: Postgres servisine iki DB mimarisini açıklayan yorum eklendi (Airflow metadata: `airflow`, Analytics: `twitter_metrics`).
+- **Sorun:** `POSTGRES_DB` env var'ı hem postgres container'ın default DB'si (`airflow`) hem de analytics servislerinin bağlandığı DB (`twitter_metrics`) için kullanılıyordu.
+- **Çözüm:** Analytics DB için ayrı bir `ANALYTICS_DB` env var'ı tanımlandı.
 
 #### Kafka Healthcheck Eklenmesi
-- **Sorun:** Kafka servisinde healthcheck tanımlı değildi. `init-kafka` ve `schema-registry` gibi bağımlı servisler, Kafka broker tamamen hazır olmadan başlayabiliyordu (race condition riski).
-- **Çözüm:** Kafka servisine `kafka-broker-api-versions` tabanlı healthcheck eklendi. Bağımlı servisler (`init-kafka`, `schema-registry`) `condition: service_healthy` ile güncellendi.
+- **Sorun:** Kafka servisinde healthcheck tanımlı değildi. Bağımlı servisler Kafka hazır olmadan başlayabiliyordu.
+- **Çözüm:** Kafka servisine `kafka-broker-api-versions` tabanlı healthcheck eklendi.
 
 #### # type: ignore yorum satırları ekleme
-- **Sorun:** Sanırım interpreterle alakalı bir sorun oldu ve python importları için local bilgisayarıma bakıldığından ve localde kurulu olmadığından hata çizgileri gösterildi. Ancak bu hata, projenin çalışmasına engel değil çünkü proje çalıştığında tüm eksikler docker ile gideriliyor. 
-- **Çözüm:** `# type: ignore` yorum satırı ile bu nedenle hata mesajı alınan yerlerde hataların görünmesini engelledik. 
+- **Sorun:** Interpreterle alakalı bir sorun oldu ve python importları için local bilgisayara bakıldığından hata çizgileri gösterildi.
+- **Çözüm:** `# type: ignore` yorum satırı ile bu hataların görünmesi engellendi. 
 
 #### Data quality check düzenlendi
-Data lake duplice kontrolü kaldırıldı.
+Data lake duplicate kontrolü kaldırıldı.
+
+</details>
 
 ---
 
-
-
-### 10. Cloud Migration — DigitalOcean Spaces (S3) Integration
+<details>
+<summary><h3>10. Cloud Migration — DigitalOcean Spaces (S3) Integration</h3></summary>
 
 > commit: feat: Migrate Data Lake to DigitalOcean Spaces (S3) and make architecture stateless
 
-Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyumlu (cloud-native) **DigitalOcean Spaces (S3 API)** altyapısına taşındı (Henüz droplet yok, sadece spaces):
+Lokal dosya sistemine dayalı Data Lake yapısı, ölçeklenebilir ve bulut uyumlu **DigitalOcean Spaces (S3 API)** altyapısına taşındı:
 
 #### Data Lake — S3 Geçişi
-- **Ham Veriler (Raw tweets):** `parquet_raw_consumer` güncellendi; artık verileri lokal disk yerine doğrudan `s3://twitter-hpa-datalake/raw_tweets/` adresine yazıyor. (`s3fs` kütüphanesi entegre edildi).
-- **İşlenmiş Veriler (Batch output):** Spark batch job çıktısı lokal diskten çıkarılarak `s3://twitter-hpa-datalake/batch_output/` adresine taşındı.
+- **Ham Veriler (Raw tweets):** `parquet_raw_consumer` güncellendi; artık verileri lokal disk yerine doğrudan `s3://twitter-hpa-datalake/raw_tweets/` adresine yazıyor.
+- **İşlenmiş Veriler (Batch output):** Spark batch job çıktısı `s3://twitter-hpa-datalake/batch_output/` adresine taşındı.
 
 #### Spark Bulut Entegrasyonu
-- Spark Submit/Master/Worker imajlarına S3 ile haberleşebilmesi için gerekli JAR paketleri (`hadoop-aws`, `aws-java-sdk-bundle`) eklendi.
-- `batch_job.py` içerisinde S3A protokolü yapılandırması tamamlandı; erişim anahtarları (Access Key/Secret Key) güvenli bir şekilde `.env` üzerinden enjekte edildi.
+- Spark imajlarına S3 ile haberleşebilmesi için gerekli JAR paketleri (`hadoop-aws`, `aws-java-sdk-bundle`) eklendi.
+- `batch_job.py` içerisinde S3A protokolü yapılandırması tamamlandı.
 
 #### PostgreSQL "Dependent View" Çözümü
-- **Sorun:** Spark'ın default `overwrite` modu tabloyu silmeye (DROP) çalıştığı için, bu tabloya bağlı olan `unified_metrics` view'u nedeniyle hata alınıyordu.
-- **Çözüm:** Spark yazma işlemi öncesinde `psycopg2` ile manuel **TRUNCATE CASCADE** komutu çalıştıran bir mantık eklendi. Spark yazma modu `append` olarak değiştirilerek veritabanı görünümlerinin bozulması engellendi.
+- **Sorun:** Spark'ın default `overwrite` modu, `unified_metrics` view'u nedeniyle hata alıyordu.
+- **Çözüm:** Manuel **TRUNCATE CASCADE** + Spark `append` modu.
 
 #### Data Quality Cloud Update
-- `dq_check.py` güncellendi; artık dosya varlığı, şema kontrolü ve veri analizlerini S3 üzerindeki veriler üzerinden gerçekleştiriyor.
+- `dq_check.py` güncellendi; artık S3 üzerindeki veriler üzerinden kontrol yapıyor.
 
 #### Altyapı Temizliği
-- `docker-compose.yml` içerisindeki Data Lake ve Batch Output klasörlerine ait yerel `volumes` tanımları kaldırılarak sunucu "stateless" (durumsuz) hale getirildi.
+- Yerel `volumes` tanımları kaldırılarak sunucu "stateless" hale getirildi.
 
 > commit: feat: complete cloud-native migration with S3 landing zone, remote logging, and flink checkpoints
 
 #### Flink Checkpoint → S3 Taşıması
-- **Sorun:** Flink checkpoint verileri konteyner içinde kalıyordu. Konteyner çöktüğünde veya yeniden başlatıldığında Flink'in durumu (state) sıfırlanıyor ve Kafka'dan tüm verileri baştan işlemek zorunda kalıyordu.
-- **Çözüm:** Flink'in resmi S3 plugin'i (`flink-s3-fs-hadoop`) Dockerfile'da plugin dizinine kopyalandı. `docker-compose.yml`'de hem JobManager hem TaskManager için S3 checkpoint/savepoint konfigürasyonu eklendi:
-  - `state.checkpoints.dir: s3://twitter-hpa-datalake/flink-checkpoints/`
-  - `state.savepoints.dir: s3://twitter-hpa-datalake/flink-savepoints/`
-  - DO Spaces endpoint ve credential'ları `env_file` + ortam değişkenleri ile aktarıldı.
-- **Sonuç:** Flink artık her 5 saniyede bir checkpoint'ini buluta yazar. Job çökse bile tam kaldığı Kafka offset'inden devam eder (exactly-once semantics).
+- Flink'in resmi S3 plugin'i (`flink-s3-fs-hadoop`) entegre edildi.
+- Checkpoint'ler `s3://twitter-hpa-datalake/flink-checkpoints/` adresine yazılıyor.
+- **Sonuç:** Job çökse bile tam kaldığı Kafka offset'inden devam eder (exactly-once semantics).
 
 #### Airflow Remote Logging → S3 Taşıması
-- **Sorun:** Airflow task logları konteyner içinde kalıyordu. Konteyner yeniden başlatıldığında geçmiş DAG çalıştırmalarının logları kayboluyordu. Ayrıca Droplet'e taşındığında disk dolma riski oluşturuyordu çünkü çok fazla log üretiliyor.
-- **Çözüm:**
-  - Özel `airflow/Dockerfile` oluşturuldu: Resmi Airflow imajına `apache-airflow-providers-amazon` paketi eklendi.
-  - `docker-compose.yml`'de Airflow servisi `image` yerine `build: ./airflow` olarak güncellendi.
-  - S3 Remote Logging konfigürasyonu ortam değişkenleri ile yapılandırıldı. 
-- **Sonuç:** Tüm DAG çalıştırma logları (Spark batch, Data Quality) artık bulutta saklanıyor. Airflow Web UI'dan geçmiş loglar S3 üzerinden okunabiliyor.
+- `apache-airflow-providers-amazon` paketi eklendi.
+- Tüm DAG çalıştırma logları bulutta saklanıyor.
 
 #### S3 Landing Zone (Raw Data Ingestion) Geçişi
-- **Sorun:** `kafka_producer` ham CSV dosyasını (`Tweets.csv`) lokal dizinden okuyordu. Bu durum, Droplet'e geçişte sunucunun "stateful" olmasına (dosyayı barındırmasına) ve ölçeklenebilirliğin kısıtlanmasına neden oluyordu.
-- **Çözüm:**
-  - DO Spaces'te `landing-zone/` dizini oluşturuldu.
-  - `kafka_producer/requirements.txt` dosyasına `s3fs` kütüphanesi eklendi.
-  - `kafka_producer/producer.py` güncellenerek lokal `with open()` yerine `s3fs` kullanılarak doğrudan S3 üzerinden okuma yapacak şekilde refactor edildi.
-  - `docker-compose.yml` içerisindeki `kafka-producer` servisine `.env` bağlantısı eklendi.
-- **Sonuç:** Droplet tamamen "Stateless" bir "Compute" birimine dönüştü. Veri sisteme dışarıdan S3 aracılığıyla giriyor ve işleniyor.
+- `kafka_producer` ham CSV dosyasını artık S3'ten okuyor (`s3fs` entegrasyonu).
+- **Sonuç:** Droplet tamamen "Stateless" bir "Compute" birimine dönüştü.
 
 > commit: fix: resolve Data Downtime Flaw using Atomic Table Swap
 
 #### Data Downtime Flaw Çözümü (Atomic Table Swap)
-- **Sorun:** Spark batch job'u `batch_tweet_metrics` tablosunu `TRUNCATE CASCADE` ile silip ardından verileri append metoduyla yazıyordu. Spark'ın verileri yazması dakikalar sürdüğü için, bu süre zarfında tablo tamamen boş kalıyor ve Lambda mimarisinin sunum katmanındaki `unified_metrics` view'ı geçmiş verileri gösteremiyordu (Data Downtime / Kesinti problemi). 
-- **Çözüm:** Atomic Table Swap stratejisi uygulandı:
-  - `postgres-init.sql` içerisine `batch_tweet_metrics_staging` isimli geçici bir tablo eklendi. Özellikle dashboard işlemleri için şarttır. 
-  - `batch_job.py` güncellenerek Spark'ın tüm veriyi önce bu staging tablosuna yazması sağlandı. Bu işlem sırasında ana tablo (`batch_tweet_metrics`) okunmaya devam edilebilir halde kaldı.
-  - Spark yazma işlemi bittikten sonra tek bir PostgreSQL transaction'ı içinde `ALTER TABLE RENAME` komutları ile staging ve ana tablo milisaniyeler içinde yer değiştirildi (Atomic Swap).
-  - Böylece view'in sorgu attığı tabloda hiçbir zaman boş veri kalmadı ve veri kesintisi (downtime) sıfıra indirildi.
+- **Sorun:** Spark batch job'u `TRUNCATE CASCADE` sonrası append ile yazarken tablo dakikalarca boş kalıyordu.
+- **Çözüm:** `batch_tweet_metrics_staging` tablosu eklendi. Spark önce staging'e yazar, sonra `ALTER TABLE RENAME` ile milisaniyeler içinde swap yapılır.
+
+</details>
 
 ---
 
-### 11. Database & Performance Optimization
+<details>
+<summary><h3>11. Database & Performance Optimization</h3></summary>
 
- > Commit: Add database indexing and table partitioning optimizations
+> Commit: Add database indexing and table partitioning optimizations
 
 #### MongoDB Compound Indexing
--`tweet_alerts` koleksiyonunda her alan için ayrı ayrı tekli indexler tanımlıydı (`airline`, `created_at`). Bu yaklaşım birden fazla alanı kapsayan sorgularda optimal performans sağlayamıyordu.  
-  - Tek alanlı indexler yerine, MongoDB'nin **Prefix Rule** kuralından faydalanan **Compound Indexler** tanımlandı:
-    - `{ airline: 1, created_at: -1 }` → Airline bazlı filtreleme + zaman sıralaması (ör. "Delta'nın son alertleri")
-    - `{ airline: 1, airline_sentiment: 1 }` → Airline + sentiment analiz sorguları
-    - `{ created_at: -1 }` → Global zaman bazlı sıralama ("son 100 alert")
-- **Sonuç:** Daha az index ile daha fazla sorgu paterni hızlandırıldı. Yazma performansı iyileşti (güncellenecek index sayısı azaldı). Disk kullanımı düştü. 
+- Tek alanlı indexler yerine **Compound Indexler** tanımlandı:
+  - `{ airline: 1, created_at: -1 }` → Airline bazlı filtreleme + zaman sıralaması
+  - `{ airline: 1, airline_sentiment: 1 }` → Airline + sentiment analiz sorguları
+  - `{ created_at: -1 }` → Global zaman bazlı sıralama
+- **Sonuç:** Daha az index ile daha fazla sorgu paterni hızlandırıldı.
 
 #### PostgreSQL Indexing & Range Partitioning
-- `tweet_metrics` (Speed Layer) tablosunda hiçbir index yoktu; `unified_metrics` view'ının filtreleme sorguları ve `prune_speed_layer` DELETE sorgusu tam tablo taraması yapıyordu. `batch_tweet_metrics` (Batch Layer) tablosu ise zamanla büyüyerek sorgu performansını düşürme riski taşıyordu.
-  - **Speed Layer Indexleri (`tweet_metrics`):**
-    - `idx_tweet_metrics_window_start` → `unified_metrics` view'ındaki `WHERE window_start >= ...` filtresi için
-    - `idx_tweet_metrics_window_end` → `prune_speed_layer` DELETE sorgusu için
-    - `idx_tweet_metrics_airline` → Dashboard airline filtreleme sorguları için
-  - **Batch Layer Range Partitioning (`batch_tweet_metrics`):**
-    - Tablo `PARTITION BY RANGE (window_start)` ile aylık bölümlendirildi.
-    - Aylık partition'lar oluşturuldu (2015-01, 2015-02, 2015-03) + `DEFAULT` partition (beklenmeyen tarihleri yakalamak için).
-    - Partition tabloları üzerinde `airline` ve `window_start` indexleri tanımlandı (otomatik olarak tüm partition'lara uygulanır).
-    - Staging tablosu (`batch_tweet_metrics_staging`) da aynı partitioned yapıda oluşturularak Atomic Table Swap uyumluluğu sağlandı.
-  - **Atomic Table Swap Güncellendi (`batch_job.py`):**
-    - Partitioned tablolarda `ALTER TABLE RENAME` işlemi child partition isimlerini değiştirmediği için, swap mekanizması güncellendi: eski ana tablo `DROP CASCADE` ile silinir, staging rename edilir. Ardından, bir sonraki işlemin isim çakışmasına neden olmaması için yeni staging partition'ları **dinamik zaman damgası (timestamp)** eklenerek sıfırdan oluşturulur.
-    - `PRIMARY KEY` kısıtlaması kaldırıldı (PostgreSQL partitioned tablolarda PK'nin partition key'i içermesini zorunlu kılar).
-- **Sonuç:** PostgreSQL sorgu süreleri büyük tablolarda dramatik şekilde azaldı (Partition Pruning sayesinde sadece ilgili partition taranır). Speed Layer sorguları index kullanarak çalışır hale geldi.
+- **Speed Layer Indexleri (`tweet_metrics`):**
+  - `idx_tweet_metrics_window_start` → `unified_metrics` view filtresi için
+  - `idx_tweet_metrics_window_end` → `prune_speed_layer` DELETE sorgusu için
+  - `idx_tweet_metrics_airline` → Dashboard airline filtreleme için
+- **Batch Layer Range Partitioning (`batch_tweet_metrics`):**
+  - Tablo `PARTITION BY RANGE (window_start)` ile aylık bölümlendirildi.
+  - Staging tablosu da aynı partitioned yapıda oluşturularak Atomic Table Swap uyumluluğu sağlandı.
+- **Atomic Table Swap Güncellendi:** Partitioned tablolarda swap mekanizması `DROP CASCADE` + rename + dinamik timestamp ile yeniden tasarlandı.
+
+</details>
 
 ---
 
-### 12. Production Readiness & Cloud Optimization (Droplet Preparation)
+<details>
+<summary><h3>12. Production Readiness & Cloud Optimization</h3></summary>
 
-> Commit: feat: Implement data persistence, automated backups, and logging limits for Droplet deployment
-
-Droplet (sunucu) geçişi öncesinde sistemin sürdürülebilirliği ve güvenliği için kritik optimizasyonlar yapıldı:
+> Commit: feat: implement data persistence, backups and logging limits for cloud deployment
 
 #### Veritabanı Kalıcılığı (Data Persistence)
 - `docker-compose.yml` dosyasına `postgres_data` ve `mongo_data` named volume'ları eklendi.
-- PostgreSQL ve MongoDB verilerinin Droplet diskinde (SSD) kalıcı olarak saklanması sağlandı. `docker compose down` komutuyla verilerin silinmesi engellendi.
+- `docker compose down` komutuyla verilerin silinmesi engellendi.
 
 #### Otomatik Bulut Yedekleme (Automated Backups)
 - `backup_job.sh` scripti oluşturuldu.
-- Script, `docker exec` ile PostgreSQL ve MongoDB'den canlı dump alır ve bu yedekleri **amazon/aws-cli** konteyneri üzerinden doğrudan **DigitalOcean Spaces (S3)** bucket'ına yükler.
-- Sunucu diskini korumak için 3 günden eski yerel yedekleri otomatik temizleyen mekanizma eklendi.
+- **amazon/aws-cli** konteyneri üzerinden doğrudan **DO Spaces (S3)** bucket'ına yedek yüklenir.
+- 3 günden eski yerel yedekler otomatik temizlenir.
 
 #### Kaynak ve Disk Yönetimi (Logging Limits)
-- Tüm Docker servisleri için global log limitleri tanımlandı (`max-size: 10m`, `max-file: 3`).
-- Streaming araçlarının (Kafka, Flink) ürettiği yoğun logların Droplet diskini doldurması engellendi.
-- YAML Anchor kullanılarak tüm servislerde standart ve merkezi log yönetimi sağlandı.
+- Global log limitleri: `max-size: 10m`, `max-file: 3`.
+- YAML Anchor kullanılarak tüm servislerde standart log yönetimi sağlandı.
+
+</details>
 
 ---
 
+<details>
+<summary><h3>13. Production Deployment (DigitalOcean Droplet) ✅</h3></summary>
 
+Proje, yerel geliştirme ortamından çıkarılarak Frankfurt (FRA1) bölgesindeki bir DigitalOcean Droplet üzerinde canlıya alındı. 
+
+#### Sunucu Yapılandırması ve Güvenlik
+- **Ubuntu 24.04 LTS:** Modern ve stabil bir işletim sistemi üzerine kurulum yapıldı.
+- **Swap (Sanal Bellek):** JVM tabanlı araçların (Kafka, Flink, Spark) bellek sıçramaları için 4 GB Swap yapılandırıldı.
+- **Firewall (UFW):** Sadece SSH ve Web UI portları dışarıya açıldı; veritabanı portları Docker ağı içinde izole edildi.
+
+#### Canlı Yayına Geçiş
+- **S3 Landing Zone:** Veri girişi doğrudan bulut üzerinden (DO Spaces) akacak şekilde ayarlandı.
+- **Stateless Architecture:** Flink checkpoint'leri, Airflow logları ve ham veri S3'te tutularak sunucunun "stateless" kalması sağlandı.
+- **Continuous Execution:** Tüm pipeline ayağa kaldırıldı ve saniyeler içinde binlerce tweetin işlendiği canlı akış doğrulandı.
+
+</details>
+
+---
+*Proje teknik hedeflerine başarıyla ulaştı ve production ortamında stabil bir şekilde çalışmaktadır.* 🚀
