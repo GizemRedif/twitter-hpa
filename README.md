@@ -164,9 +164,11 @@ twitter-hpa/
 
 </details>
 
+---
+
 <details>
 <summary><h3>📌 Notes & Configuration</h3></summary>
-
+ 
 > **Not:** Bu projede temel hedef, elimdeki veri setine göre optimizasyon yapmak değil; gerçek dünya standartlarında bir sistem mimarisi kurmayı öğrenmektir. Bu nedenle şu anda projemde over-provisioned kaynaklar bulunmaktadır (Partition sayıları, Flink parallelism ayarı gibi). 
 
 #### ⚙️ Kritik Ayarlar
