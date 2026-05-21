@@ -165,9 +165,15 @@ cd /root/twitter-hpa
 docker compose up -d --build
 ```
 
+> **⚠️ Kritik (Airflow Yetkisi):** Airflow, Spark ve Veri Kalite Kontrol (Data Quality) işlerini tetiklemek için `docker exec` komutunu kullanır. Airflow konteynerinin sunucu (host) üzerindeki Docker deamon'ına erişebilmesi için aşağıdaki komutu **mutlaka** Droplet terminalinde çalıştırın:
+> ```bash
+> sudo chmod 666 /var/run/docker.sock
+> ```
+> Bu yetkilendirme yapılmazsa Airflow arayüzündeki görevler `Permission Denied` (Yetki Hatası) alarak başarısız olacaktır.
+
 İlk build süresi ~5-10 dakika sürebilir (Flink Maven build + Spark JAR indirme).
 
-> **💡 ÖNEMLİ:** **Projeniz tam olarak bu komutu çalıştırdığınız an aktif hale gelir ve çalışmaya başlar!** 
+> **💡 ÖNEMLİ:** **Projeniz tam olarak bu komutları çalıştırdığınız an aktif hale gelir ve çalışmaya başlar!** 
 > Bu andan itibaren tüm kuyruklar ve veri akışları arka planda 7/24 çalışacak şekilde devreye girer. DO Spaces üzerindeki veri akış klasörleri (`raw_tweets`, `flink-checkpoints` vb.) otomatik olarak bu adımın ardından oluşmaya başlar. Komut bittikten sonra terminalinizi ve bilgisayarınızı güvenle kapatabilirsiniz ama backup otomasyonu da yaptıktan sonra kapatman önerilir.
 
 ### Kontrol Komutları
