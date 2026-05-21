@@ -98,7 +98,7 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8081/subjects" ]
+      test: [ "CMD", "cub", "sr-ready", "localhost", "8081", "1" ]
       interval: 10s
       timeout: 5s
       retries: 5
