@@ -4,7 +4,7 @@
 
 # Bu DAG, Spark batch job'unu schedule etmek içindir.
 # - PySpark batch job'ını periyodik olarak tetikler. 
-# - Spark-submit container'ını docker compose run ile çalıştırır.
+# - Spark-submit container'ına docker exec ile bağlanarak çalıştırır.
 
 # Schedule: @hourly (her saat başı çalışır)
 
@@ -43,6 +43,7 @@ with DAG(
         bash_command=(
             "docker exec spark-submit "                 # Sürekli ayakta kalan spark-submit container'ına bağlanır
             "/opt/spark/bin/spark-submit "              # Spark'ın submit komutunu çalıştırır
+            "--packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 "  # S3 (DO Spaces) erişimi için gerekli JAR'lar
             "--master spark://spark-master:7077 "       # Job'u Spark master'a gönderir
             "--deploy-mode client "                     # Driver, submit eden makinede çalışır (cluster modu değil)
             "/opt/spark-jobs/batch_job.py"              # Çalıştırılacak PySpark scripti (batch_job.py)
@@ -71,8 +72,6 @@ with DAG(
 # AKIŞ ÖZETİ
 # Her saat başı Airflow tetikler
 # 1. BashOperator → docker exec spark-submit → batch_job.py çalışır
-# 2. BashOperator → docker compose run data-quality-check → dq_check.py çalışır
+# 2. BashOperator → docker exec data-quality-check → dq_check.py çalışır
 # batch_job.py: Data Lake (Parquet) → Metrik Hesaplama → PostgreSQL + Parquet
 # dq_check.py: Parquet + PostgreSQL + MongoDB veri kalite kontrolü
-
-

@@ -1,5 +1,5 @@
-# Docker konteynerın ayağa kalktığı anda "ilk çalıştırılan talimat listesi" gibidir.
 #!/bin/bash
+# Docker konteynerın ayağa kalktığı anda "ilk çalıştırılan talimat listesi" gibidir.
 # =============================================================
 # Flink JobManager için özel başlatma scripti
 # =============================================================

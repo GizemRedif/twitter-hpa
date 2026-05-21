@@ -37,16 +37,19 @@ ssh root@DROPLET_IP_ADRESI
 Kafka, Flink ve Spark gibi JVM tabanlı araçlar anlık bellek sıçramaları yapar. Swap olmazsa sistem kilitlenebilir.
 
 ```bash
-fallocate -l 4G /swapfile
-chmod 600 /swapfile
-mkswap /swapfile
-swapon /swapfile
+fallocate -l 4G /swapfile && 
+chmod 600 /swapfile && 
+mkswap /swapfile && 
+swapon /swapfile && 
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+# Tek seferde hepsini kopyala ve yapıştır.
 ```
 
 Doğrulama:
 ```bash
 free -h
+
 # Swap satırında 4.0G görmelisiniz
 ```
 
@@ -56,6 +59,7 @@ free -h
 
 ```bash
 # Sistem güncellemesi
+# Açılan ekranda "keep the local version currently installed" seçeneğini seçin ve ardından tab tuşu ile ok işaretine gidin.
 apt update && apt upgrade -y
 
 # Docker kurulumu (Resmi script)
@@ -84,6 +88,8 @@ cat <<EOF > /etc/docker/daemon.json
 EOF
 
 systemctl restart docker
+
+#Herhangi bir terminal çıktısı üretmez
 ```
 
 > **Not:** Bu global ayar, `docker-compose.yml` içindeki `x-logging` ayarıyla aynı işi yapar. İkisi birlikte olması sorun çıkarmaz; çift güvenlik görevi görür.
@@ -94,6 +100,8 @@ systemctl restart docker
 
 Veritabanı portlarının dışarıya açık kalmaması için güvenlik duvarı kurun:
 
+> **⚠️ Kritik:** `ufw allow 22` satırını **mutlaka** `ufw enable`'dan **önce** çalıştırın! Aksi halde SSH bağlantınız kesilir ve Droplet'e bir daha giremezsiniz.
+
 ```bash
 ufw allow 22       # SSH — Bu olmadan bağlantınız kopar!
 ufw allow 8081     # Airflow Web UI
@@ -101,8 +109,6 @@ ufw allow 8082     # Flink Web UI (opsiyonel, debug için)
 ufw allow 8084     # Spark Master Web UI (opsiyonel, debug için)
 ufw enable
 ```
-
-> **⚠️ Kritik:** `ufw allow 22` satırını **mutlaka** `ufw enable`'dan **önce** çalıştırın! Aksi halde SSH bağlantınız kesilir ve Droplet'e bir daha giremezsiniz.
 
 **Kapalı kalan portlar (güvenli):** PostgreSQL (5432), MongoDB (27018), Kafka (9092), Zookeeper (2181) — bunlar dışarıdan erişilemez, yalnızca Docker ağı içinden erişilir.
 
@@ -152,7 +158,7 @@ Producer, ham veriyi S3'ten okur. Eğer henüz yapmadıysanız:
 
 ---
 
-## 9. Sistemi Başlatma
+## 9. Sistemi Başlatma (Projenin Canlıya Geçtiği ve Çalıştığı An)
 
 ```bash
 cd /root/twitter-hpa
@@ -160,6 +166,9 @@ docker compose up -d --build
 ```
 
 İlk build süresi ~5-10 dakika sürebilir (Flink Maven build + Spark JAR indirme).
+
+> **💡 ÖNEMLİ:** **Projeniz tam olarak bu komutu çalıştırdığınız an aktif hale gelir ve çalışmaya başlar!** 
+> Bu andan itibaren tüm kuyruklar ve veri akışları arka planda 7/24 çalışacak şekilde devreye girer. DO Spaces üzerindeki veri akış klasörleri (`raw_tweets`, `flink-checkpoints` vb.) otomatik olarak bu adımın ardından oluşmaya başlar. Komut bittikten sonra terminalinizi ve bilgisayarınızı güvenle kapatabilirsiniz ama backup otomasyonu da yaptıktan sonra kapatman önerilir.
 
 ### Kontrol Komutları
 
@@ -192,8 +201,14 @@ Açılan editörün en altına şu satırı ekleyin:
 ```
 0 3 * * * /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1
 ```
+Cron görevinin eklendiğini kontrol etmek isterseniz `crontab -l` çalıştırın ve çıktının en altında şu var mı bakın: `0 3 * * * /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1`
 
-Bu sayede her gece **03:00**'te PostgreSQL ve MongoDB yedekleri otomatik olarak DO Spaces'e yüklenecektir.
+Bu sayede her gece **03:00**'te PostgreSQL ve MongoDB veritabanı yedekleri otomatik olarak alınacak ve DO Spaces (S3) üzerindeki şu klasörlere yüklenecektir:
+
+* **PostgreSQL (Analitik Metrikler) Yedeği:** `backups/postgres/postgres_backup_[YILI_AYI_GUNU_SAATI].dump` olarak kaydedilir.
+* **MongoDB (Kritik Uyarılar) Yedeği:** `backups/mongo/mongo_backup_[YILI_AYI_GUNU_SAATI].archive` olarak kaydedilir.
+
+> **💡 Ek Bilgi:** Sunucunun diskinin dolmaması için, sunucu içindeki `/root/twitter-hpa/backups/` klasöründe bulunan 3 günden eski yerel yedek dosyaları otomatik olarak temizlenir. DO Spaces üzerindeki yedekleriniz ise süresiz ve güvenli olarak kalmaya devam eder.
 
 ---
 

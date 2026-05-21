@@ -133,6 +133,11 @@ services:
     volumes:
       - ./postgres-init.sql:/docker-entrypoint-initdb.d/init-metrics.sql:ro
       - postgres_data:/var/lib/postgresql/data #Bu kısım verileri kalıcı tutar, en alttaki named volume'a bağlanıyor
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo:
     image: mongo:7
@@ -143,6 +148,11 @@ services:
     volumes:
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       - mongo_data:/data/db #Bu kısım verileri kalıcı tutar, en alttaki named volume'a bağlanıyor
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Hazır image kullanmak yerine kendimiz build ediyoruz (Dockerfile kullanarak)
   mongo-alert-consumer:
@@ -153,7 +163,7 @@ services:
       schema-registry:
         condition: service_healthy
       mongo:
-        condition: service_started
+        condition: service_healthy
     environment:
       PYTHONUNBUFFERED: "1"
     restart: on-failure
@@ -181,7 +191,7 @@ services:
       schema-registry:
         condition: service_healthy
       postgres:
-        condition: service_started
+        condition: service_healthy
     environment:
       PYTHONUNBUFFERED: "1"
     env_file:
@@ -199,8 +209,10 @@ services:
     build: ./airflow
     logging: *default-logging
     container_name: airflow
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -224,6 +236,7 @@ services:
       - "8081:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - /var/run/docker.sock:/var/run/docker.sock  # Airflow'un docker exec ile diğer container'lara komut göndermesi için
     command: >
       bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname airflow --lastname airflow --role Admin --email ${AIRFLOW_EMAIL} && { airflow webserver & exec airflow scheduler; }"
 
@@ -241,6 +254,7 @@ services:
     build: ./flink-tweets-stream
     logging: *default-logging
     container_name: flink-jobmanager
+    restart: unless-stopped
     ports:
       - "8082:8081"
     env_file:
@@ -277,6 +291,7 @@ services:
     build: ./flink-tweets-stream
     logging: *default-logging
     container_name: flink-taskmanager
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -302,9 +317,9 @@ services:
   # Spark Submit (Batch job çalıştırıcı - one-shot)
   # ============================================================
   # Job'u master'a gönderen container. "Şu scripti (batch_job.py) çalıştır" diyen istemci.
-  # MongoDB'den ham verileri okuyup batch metrikleri hesaplar.
+  # S3'ten (Data Lake) ham verileri okuyup batch metrikleri hesaplar.
   # Sonuçları PostgreSQL ve Parquet olarak yazar.
-  # Job bitince container durur (restart: "no").
+  # Airflow tetiklemeleri için container ayakta kalır (restart: unless-stopped).
   spark-submit:
     build: ./spark
     logging: *default-logging
@@ -327,10 +342,14 @@ services:
         echo "Initial batch job completed! Container staying alive for Airflow triggers..."
         tail -f /dev/null
     depends_on:
-      - spark-master
-      - spark-worker
-      - mongo
-      - postgres
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      mongo:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # ============================================================
@@ -342,6 +361,7 @@ services:
     build: ./spark
     logging: *default-logging
     container_name: spark-master
+    restart: unless-stopped
     ports:
       - "8084:8080"
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
@@ -355,6 +375,7 @@ services:
     build: ./spark
     logging: *default-logging
     container_name: spark-worker
+    restart: unless-stopped
     environment:
       SPARK_WORKER_CORES: 1
       SPARK_WORKER_MEMORY: 1G
@@ -371,7 +392,7 @@ services:
   # ============================================================
   # Data Quality Check (Veri Kalite Kontrol - one-shot)
   # ============================================================
-  # Parquet Data Lake, PostgreSQL ve MongoDB'deki verilerin kalite kontrolünü yapan container. Job bitince container durur.
+  # Parquet Data Lake, PostgreSQL ve MongoDB'deki verilerin kalite kontrolünü yapan container. Airflow tetiklemeleri için container ayakta kalır.
   # Kontroller: Şema doğrulama, null kontrolü, sentiment tutarlılığı, oran aralıkları, duplicate tespiti, toplam tutarlılık. 
   data-quality-check:
     build: ./data_quality
@@ -382,9 +403,11 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
     depends_on:
-      - postgres
-      - mongo
-    restart: "no"
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
 
 # --------------------------------------------------------------------------------------------------------------------------
 # Veritabanındaki verilerin kalıcı olmasını sağlamak için. docker compose down yapıldığında veriler silinmez.

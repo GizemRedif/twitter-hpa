@@ -22,8 +22,8 @@ echo "[$TIMESTAMP] Backup process is starting..."
 # 1. PostgreSQL Yedeği
 PG_BACKUP_FILE="postgres_backup_$TIMESTAMP.dump"
 echo "Creating a PostgreSQL backup...."
-# twitter_metrics veritabanının yedeğini al (Özelleştirilmiş formatta)
-docker exec postgres pg_dump -U $POSTGRES_USER -d twitter_metrics -F c -f /tmp/$PG_BACKUP_FILE
+# $ANALYTICS_DB veritabanının yedeğini al (Özelleştirilmiş formatta)
+docker exec postgres pg_dump -U $POSTGRES_USER -d $ANALYTICS_DB -F c -f /tmp/$PG_BACKUP_FILE
 docker cp postgres:/tmp/$PG_BACKUP_FILE "$BACKUP_DIR/$PG_BACKUP_FILE"
 docker exec postgres rm /tmp/$PG_BACKUP_FILE
 

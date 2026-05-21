@@ -69,18 +69,22 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 ---
 
 <details>
-<summary><h3>🚀 Kurulum ve Çalıştırma</h3></summary>
+<summary><h3>🚀 Kurulum ve Çalıştırma (2 Alternatif Yol)</h3></summary>
 
-> Bu proje herhangi bir bilgisayarda (Windows, Mac, Linux) Docker ile çalıştırılabilir. DigitalOcean Droplet'e deploy etmek **zorunlu değildir**.
+Bu projeyi çalıştırmak için ihtiyacınıza göre **iki farklı yöntemden birini** seçebilirsiniz. İki yöntemi aynı anda yapmanıza gerek yoktur.
+
+---
+
+### 🗺️ YOL A: Yerel Kurulum (Kendi Bilgisayarınızda Test Etmek İçin)
+
+Eğer projeyi kendi bilgisayarınızda (Windows, Mac, Linux) geçici olarak çalıştırıp denemek istiyorsanız bu yolu izleyin:
 
 #### Ön Gereksinimler
-- Docker & Docker Compose
+- Bilgisayarınızda **Docker & Docker Compose** kurulu ve çalışır durumda olmalıdır.
 - **S3 uyumlu bulut depolama hesabı:** [DigitalOcean Spaces](https://www.digitalocean.com/products/spaces), [AWS S3](https://aws.amazon.com/s3/) veya herhangi bir S3 uyumlu servis.
 
 #### 1. S3 Bucket Oluşturma ve Erişim Anahtarları
-
 Bu proje, veri okuma/yazma işlemlerini bulut üzerinden (S3) yapar.
-
 **DigitalOcean Spaces kullanıyorsanız:**
 1. [DigitalOcean](https://cloud.digitalocean.com/) panelinden bir Space oluşturun (örn: `twitter-hpa-datalake`).
 2. Bölge olarak **Frankfurt (FRA1)** seçin.
@@ -101,13 +105,24 @@ S3_BUCKET_NAME=twitter-hpa-datalake
 ```
 
 #### 4. Sistemi Başlatma
+Kendi bilgisayarınızda terminal açıp proje dizininde şu komutu çalıştırın:
 ```bash
 docker compose up --build -d
 ```
 
-#### Production Deployment (Opsiyonel — DigitalOcean Droplet)
+---
 
-👉 **[DEPLOYMENT.md](DEPLOYMENT.md)** — Droplet üzerinde canlıya geçiş rehberi.
+### ☁️ YOL B: Bulut Canlıya Alma (DigitalOcean Droplet - 7/24 Kesintisiz)
+
+Eğer projeyi yerel bilgisayarınızdan bağımsız olarak, uzak bir sunucuda 7/24 kesintisiz çalışacak şekilde canlıya almak istiyorsanız **Yol A adımlarını tamamen atlayın** ve doğrudan aşağıdaki rehberi uygulayın:
+
+👉 **[DEPLOYMENT.md](DEPLOYMENT.md)** — DigitalOcean Droplet üzerinde canlıya geçiş rehberi.
+
+> **💡 Droplet Kullandıysanız Neleri Yapmanıza Gerek Yok?**
+> 1. Projeyi kendi bilgisayarınıza indirmek (clone etmek) veya local olarak çalıştırmak 
+> 2. Yerel bilgisayarda Docker açmak
+> 3. SSH bağlantısı yaptığınız terminali açık tutmak
+> 4. Yol A'daki adımları kendi bilgisayarınızda tekrar uygulamak
 
 </details>
 

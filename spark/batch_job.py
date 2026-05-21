@@ -39,6 +39,9 @@ PARQUET_OUTPUT_PATH = f"s3a://{S3_BUCKET_NAME}/batch_output"
 # Spark uygulamasını başlatır. 
 def create_spark_session():
     """MongoDB, PostgreSQL ve S3 (DO Spaces) bağlantıları için yapılandırılmış SparkSession oluşturur."""
+    if not AWS_KEY or not AWS_SECRET:
+        raise ValueError("[ERROR] AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY environment variables are missing! Please check your .env configuration.")
+
     spark = (
         SparkSession.builder
         .appName("Twitter HPA - Batch Layer")
@@ -213,6 +216,8 @@ def write_to_postgresql(metrics_df):
     # Bir sonraki saat Spark tekrar çalışabilsin diye, adını değiştirdiğimiz o yedek tablonun yerine bomboş yeni bir yedek tablo (batch_tweet_metrics_staging) yarat (CREATE)
 
     print("[INFO] Performing atomic table swap (staging -> main)...")
+    conn = None
+    cur = None
     try:
         conn = psycopg2.connect(**conn_params) 
         conn.autocommit = False
@@ -279,17 +284,34 @@ def write_to_postgresql(metrics_df):
             CREATE TABLE batch_staging_{ts}_default PARTITION OF {staging_table} DEFAULT;
         """)
 
+        # Staging partition index'lerini oluştur (swap sonrası performans için)
+        cur.execute(f"""
+            CREATE INDEX idx_batch_staging_airline ON {staging_table} (airline);
+            CREATE INDEX idx_batch_staging_window_start ON {staging_table} (window_start);
+        """)
+
         conn.commit()
-        cur.close()
-        conn.close()
         print("[INFO] Atomic swap completed — zero downtime!")
 
     except Exception as e:
         print(f"[ERROR] Atomic swap failed, rolling back: {e}")
-        conn.rollback()
-        cur.close()
-        conn.close()
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                print(f"[WARNING] Rollback failed: {rollback_err}")
         raise
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def prune_speed_layer(spark, metrics_df):
@@ -307,6 +329,8 @@ def prune_speed_layer(spark, metrics_df):
         print(f"[INFO] Pruning real-time metrics older than or equal to: {max_window_end}")
         
         # JDBC ile değil, direkt psycopg2 ile DELETE sorgusu çalıştırıyoruz
+        conn = None
+        cur = None
         try:
             # os.environ.get logic'ini kullanarak DB adını al
             dbname = os.environ.get("ANALYTICS_DB", "twitter_metrics")
@@ -326,11 +350,20 @@ def prune_speed_layer(spark, metrics_df):
             deleted_rows = cur.rowcount
             
             conn.commit()
-            cur.close()
-            conn.close()
             print(f"[INFO] Successfully pruned {deleted_rows} rows from tweet_metrics.")
         except Exception as e:
             print(f"[ERROR] Speed layer pruning failed: {e}")
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except:
+                    pass
+            if conn is not None:
+                try:
+                    conn.close()
+                except:
+                    pass
     else:
         print("[WARN] No window_end found, skipping pruning.")
 

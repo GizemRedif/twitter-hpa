@@ -87,10 +87,11 @@ def create_consumer(max_retries: int = 30, retry_interval: int = 5):
     raise RuntimeError("Could not connect after maximum retries")
 
 
-def flush_to_parquet(buffer: list):
+def flush_to_parquet(buffer: list, max_retries: int = 5, initial_delay: float = 2.0):
     """
     Bellekteki tweet listesini bir Parquet dosyasına yazar.
     Dosya adı: raw_tweets_<timestamp>.parquet şeklinde benzersiz (unique) olur.
+    Hata durumunda retry mekanizması mevcuttur. Başarısız olursa Exception fırlatır.
     """
     if not buffer:
         return
@@ -114,11 +115,19 @@ def flush_to_parquet(buffer: list):
         client_kwargs={'endpoint_url': S3_ENDPOINT_URL, 'region_name': AWS_REGION}
     )
     
-    # Check if bucket exists, if not this script will just attempt to write.
-    # Write Parquet to S3 directly:
-    pq.write_table(table, file_path, filesystem=fs, compression="snappy")
-
-    print(f"[INFO] Flushed {len(buffer)} tweets to {file_path}")
+    delay = initial_delay
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Write Parquet to S3 directly:
+            pq.write_table(table, file_path, filesystem=fs, compression="snappy")
+            print(f"[INFO] Flushed {len(buffer)} tweets to {file_path}")
+            return
+        except Exception as e:
+            print(f"[ERROR] Attempt {attempt}/{max_retries} to write Parquet to S3 failed: {e}")
+            if attempt == max_retries:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 # ---------------- Ana akış -----------------------------
@@ -143,10 +152,14 @@ def main():
             if msg is None:
                 # Mesaj gelmese bile süre dolmuşsa flush et
                 if buffer and (time.time() - last_flush_time >= FLUSH_INTERVAL_SEC):
-                    flush_to_parquet(buffer)
-                    total_saved += len(buffer)
-                    buffer = []
-                    last_flush_time = time.time()
+                    try:
+                        flush_to_parquet(buffer)
+                        total_saved += len(buffer)
+                        buffer = []
+                        last_flush_time = time.time()
+                    except Exception as e:
+                        print(f"[CRITICAL] Failed to flush buffer to S3 after retries: {e}. Keeping buffer and crashing to restart.")
+                        raise
                 continue
 
             if msg.error():
@@ -174,19 +187,26 @@ def main():
 
             # Buffer dolduğunda flush et
             if len(buffer) >= FLUSH_BATCH_SIZE:
-                flush_to_parquet(buffer)
-                total_saved += len(buffer)
-                buffer = []
-                last_flush_time = time.time()
-                print(f"[INFO] Total: {total_saved} saved, {skipped_count} skipped")
+                try:
+                    flush_to_parquet(buffer)
+                    total_saved += len(buffer)
+                    buffer = []
+                    last_flush_time = time.time()
+                    print(f"[INFO] Total: {total_saved} saved, {skipped_count} skipped")
+                except Exception as e:
+                    print(f"[CRITICAL] Failed to flush buffer to S3 after retries: {e}. Keeping buffer and crashing to restart.")
+                    raise
 
     except KeyboardInterrupt:
         print("Shutting down...")
         # Kalan verileri flush et
         if buffer:
-            flush_to_parquet(buffer)
-            total_saved += len(buffer)
-            print(f"[INFO] Final flush: {len(buffer)} tweets")
+            try:
+                flush_to_parquet(buffer)
+                total_saved += len(buffer)
+                print(f"[INFO] Final flush: {len(buffer)} tweets")
+            except Exception as e:
+                print(f"[ERROR] Final flush failed: {e}")
     finally:
         consumer.close()
         print(f"[INFO] Consumer closed. Total saved: {total_saved}, skipped: {skipped_count}")

@@ -124,6 +124,10 @@ CREATE TABLE batch_staging_2015_03 PARTITION OF batch_tweet_metrics_staging
 
 CREATE TABLE batch_staging_default PARTITION OF batch_tweet_metrics_staging DEFAULT;
 
+-- Staging Layer Indexleri (partition tablolarına otomatik uygulanır)
+CREATE INDEX idx_batch_staging_airline ON batch_tweet_metrics_staging (airline);
+CREATE INDEX idx_batch_staging_window_start ON batch_tweet_metrics_staging (window_start);
+
 
 
 
