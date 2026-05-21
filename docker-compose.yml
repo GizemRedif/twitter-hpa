@@ -230,9 +230,8 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_REGION}
-      # Airflow'un AWS bağlantısını ortam değişkeninden okuması için
-      # Connection URI formatı: aws://<access_key>:<secret_key>@?endpoint_url=<endpoint>
-      AIRFLOW_CONN_AWS_DEFAULT: "aws://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@?endpoint_url=${S3_ENDPOINT_URL}"
+      # Airflow'un AWS bağlantısını ortam değişkeninden okuması için (JSON formatı slash sorunlarını önler)
+      AIRFLOW_CONN_AWS_DEFAULT: '{"conn_type": "aws", "login": "${AWS_ACCESS_KEY_ID}", "password": "${AWS_SECRET_ACCESS_KEY}", "extra": {"endpoint_url": "${S3_ENDPOINT_URL}", "region_name": "${AWS_REGION}"}}'
     ports:
       - "8081:8080"
     volumes:
