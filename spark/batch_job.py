@@ -286,8 +286,8 @@ def write_to_postgresql(metrics_df):
 
         # Staging partition index'lerini oluştur (swap sonrası performans için)
         cur.execute(f"""
-            CREATE INDEX idx_batch_staging_airline ON {staging_table} (airline);
-            CREATE INDEX idx_batch_staging_window_start ON {staging_table} (window_start);
+            CREATE INDEX idx_batch_staging_{ts}_airline ON {staging_table} (airline);
+            CREATE INDEX idx_batch_staging_{ts}_window_start ON {staging_table} (window_start);
         """)
 
         conn.commit()
