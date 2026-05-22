@@ -9,6 +9,8 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 | ☁️ **Cloud Deployment**
 | 🚀 **DigitalOcean Droplet**
 
+👉 **Projenin canlı çalışma kanıtları için: [📸 SCREENSHOTS.md](SCREENSHOTS.md)**
+
 ---
 ### Architecture Flow
 ![Architecture - Data Flow Diagram](Architecture%20-%20Data%20Flow%20Diagram.jpeg)
@@ -173,6 +175,7 @@ twitter-hpa/
 ├── mongo-init.js             # MongoDB Index & Collections
 ├── backup_job.sh             # Automated S3 Backup Script
 ├── DEPLOYMENT.md             # Production Deployment Guide
+├── SCREENSHOTS.md            # Live system screenshots & proof of work
 ├── .env.example              # Env template
 └── Project roadmap.md        # Technical roadmap
 ```
