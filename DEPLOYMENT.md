@@ -195,6 +195,8 @@ Tüm konteynerler `Up` veya `Up (healthy)` durumunda olmalıdır. `init-kafka` k
 
 ## 10. Backup Otomasyonu (Cron)
 
+> **⚠️ Kritik Yetkilendirme:** Script'in arka planda çalıştırılabilmesi için yetki verilmesi gerekir. Ayrıca garanti olması amacıyla cron tanımında komutun başına `bash` ekliyoruz (böylece yetki unutulsa bile `Permission Denied` hatası alınmaz).
+
 ```bash
 # Script'e çalıştırma yetkisi verin
 chmod +x /root/twitter-hpa/backup_job.sh
@@ -203,11 +205,11 @@ chmod +x /root/twitter-hpa/backup_job.sh
 crontab -e
 ```
 
-Açılan editörün en altına şu satırı ekleyin:
+Açılan editörün en altına şu satırı ekleyin (başına `bash` eklediğimizden emin olun):
+```text
+0 3 * * * bash /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1
 ```
-0 3 * * * /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1
-```
-Cron görevinin eklendiğini kontrol etmek isterseniz `crontab -l` çalıştırın ve çıktının en altında şu var mı bakın: `0 3 * * * /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1`
+Cron görevinin eklendiğini kontrol etmek isterseniz `crontab -l` çalıştırın ve çıktının en altında şu satırın yer aldığını doğrulayın: `0 3 * * * bash /root/twitter-hpa/backup_job.sh >> /var/log/backup_job.log 2>&1`
 
 Bu sayede her gece **03:00**'te PostgreSQL ve MongoDB veritabanı yedekleri otomatik olarak alınacak ve DO Spaces (S3) üzerindeki şu klasörlere yüklenecektir:
 
