@@ -2,14 +2,14 @@
 
 Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla **Lambda Mimari** prensipleri doğrultusunda geliştirilmiştir.
 
-#### Proje Durumu: 🟢 Canlıda (Production)
-| ⚡ **Speed Layer** 
-| 🗄️ **Serving Layer** 
-| 📦 **Batch Layer**
-| ☁️ **Cloud Deployment**
-| 🚀 **DigitalOcean Droplet**
+#### Proje Durumu: Canlıda (Production)
+| **Speed Layer** 
+| **Serving Layer** 
+| **Batch Layer**
+| **Cloud Deployment**
+| **DigitalOcean Droplet**
 
-👉 **Projenin canlı çalışma kanıtları için: [📸 SCREENSHOTS.md](SCREENSHOTS.md)**
+**Projenin canlı çalışma kanıtları için: [SCREENSHOTS.md](SCREENSHOTS.md)**
 
 ---
 ### Architecture Flow
@@ -35,7 +35,7 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 ---
 
 <details>
-<summary><h3>📋 Pipeline Details</h3></summary>
+<summary><h3>Pipeline Details</h3></summary>
 
 #### 1. Data Ingestion - S3 Landing Zone
 - **Producer:** Python tabanlı `kafka-producer`, ham tweet verilerini doğrudan buluttan (**DO Spaces**) `s3fs` kullanarak okur.
@@ -71,13 +71,13 @@ Bu proje, Twitter verilerini gerçek zamanlı ve toplu olarak işlemek amacıyla
 ---
 
 <details>
-<summary><h3>🚀 Kurulum ve Çalıştırma (2 Alternatif Yol)</h3></summary>
+<summary><h3>Kurulum ve Çalıştırma (2 Alternatif Yol)</h3></summary>
 
 Bu projeyi çalıştırmak için ihtiyacınıza göre **iki farklı yöntemden birini** seçebilirsiniz. İki yöntemi aynı anda yapmanıza gerek yoktur.
 
 ---
 
-### 🗺️ YOL A: Yerel Kurulum (Kendi Bilgisayarınızda Test Etmek İçin)
+### YOL A: Yerel Kurulum (Kendi Bilgisayarınızda Test Etmek İçin)
 
 Eğer projeyi kendi bilgisayarınızda (Windows, Mac, Linux) geçici olarak çalıştırıp denemek istiyorsanız bu yolu izleyin:
 
@@ -114,13 +114,13 @@ docker compose up --build -d
 
 ---
 
-### ☁️ YOL B: Bulut Canlıya Alma (DigitalOcean Droplet - 7/24 Kesintisiz)
+### YOL B: Bulut Canlıya Alma (DigitalOcean Droplet - 7/24 Kesintisiz)
 
 Eğer projeyi yerel bilgisayarınızdan bağımsız olarak, uzak bir sunucuda 7/24 kesintisiz çalışacak şekilde canlıya almak istiyorsanız **Yol A adımlarını tamamen atlayın** ve doğrudan aşağıdaki rehberi uygulayın:
 
-👉 **[DEPLOYMENT.md](DEPLOYMENT.md)** — DigitalOcean Droplet üzerinde canlıya geçiş rehberi.
+**[DEPLOYMENT.md](DEPLOYMENT.md)** — DigitalOcean Droplet üzerinde canlıya geçiş rehberi.
 
-> **💡 Droplet Kullandıysanız Neleri Yapmanıza Gerek Yok?**
+> **Droplet Kullandıysanız Neleri Yapmanıza Gerek Yok?**
 > 1. Projeyi kendi bilgisayarınıza indirmek (clone etmek) veya local olarak çalıştırmak 
 > 2. Yerel bilgisayarda Docker açmak
 > 3. SSH bağlantısı yaptığınız terminali açık tutmak
@@ -131,7 +131,7 @@ Eğer projeyi yerel bilgisayarınızdan bağımsız olarak, uzak bir sunucuda 7/
 ---
 
 <details>
-<summary><h3>🔗 Service Endpoints & Data Lake Paths</h3></summary>
+<summary><h3>Service Endpoints & Data Lake Paths</h3></summary>
 
 | Service | Address | Details |
 |--------|-------|-------|
@@ -157,7 +157,7 @@ Eğer projeyi yerel bilgisayarınızdan bağımsız olarak, uzak bir sunucuda 7/
 ---
 
 <details>
-<summary><h3>📁 Project Structure</h3></summary>
+<summary><h3>Project Structure</h3></summary>
 
 ```
 twitter-hpa/
@@ -185,11 +185,11 @@ twitter-hpa/
 ---
 
 <details>
-<summary><h3>📌 Notes & Configuration</h3></summary>
+<summary><h3>Notes & Configuration</h3></summary>
  
 > **Not:** Bu projede temel hedef, elimdeki veri setine göre optimizasyon yapmak değil; gerçek dünya standartlarında bir sistem mimarisi kurmayı öğrenmektir. Bu nedenle şu anda projemde over-provisioned kaynaklar bulunmaktadır (Partition sayıları, Flink parallelism ayarı gibi). 
 
-#### ⚙️ Kritik Ayarlar
+#### Kritik Ayarlar
 
 | Component | Setting | Value |
 |-----------|---------|-------|
