@@ -144,15 +144,13 @@ S3_BUCKET_NAME=twitter-hpa-datalake
 ```
 Kaydetmek için: `CTRL+O` → Enter → `CTRL+X`
 
----
-
 ## 8. S3 Landing Zone Kontrolü
 
 Producer, ham veriyi S3'ten okur. Eğer henüz yapmadıysanız:
 
 1. DigitalOcean Spaces paneline gidin.
 2. Bucket'ınızda `landing-zone/` klasörü oluşturun.
-3. `Tweets.csv` dosyasını bu klasöre yükleyin.
+3. Proje klasöründeki `data/Tweets.csv` dosyasını buluttaki bu `landing-zone/` klasörüne yükleyin.
 
 > **⚠️ Uyarı:** Bu adım yapılmazsa `kafka-producer` konteyneri hata verip kapanır.
 

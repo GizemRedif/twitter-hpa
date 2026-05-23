@@ -93,8 +93,9 @@ Bu proje, veri okuma/yazma işlemlerini bulut üzerinden (S3) yapar.
 3. **API** → **Spaces Keys** kısmından `Access Key` ve `Secret Key` oluşturun.
 
 #### 2. S3 Landing Zone Hazırlığı
-- Bucket içinde `landing-zone` adında bir klasör açın.
-- `Tweets.csv` dosyasını bu klasörün içine yükleyin.
+- Proje içindeki `data\` klasöründe hazır bulunan `Tweets.csv` veri setini kullanacağız. (Eğer veri seti klasörde yoksa, [Kaggle - Twitter US Airline Sentiment](https://www.kaggle.com/datasets/crowdflower/twitter-airline-sentiment?resource=download) adresinden indirip `data/` klasörüne yerleştirebilirsiniz).
+- S3/Spaces Bucket'ınızın içinde `landing-zone` adında bir klasör açın.
+- Projedeki `data/Tweets.csv` dosyasını bu `landing-zone/` klasörünün içine yükleyin.
 
 #### 3. Environment Variables (.env)
 `.env.example` dosyasını `.env` olarak kopyalayıp S3 anahtarlarınızı girin:
